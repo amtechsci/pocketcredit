@@ -2461,6 +2461,10 @@ class AdminApiService {
     return this.request('POST', `/cron/task/${taskName}/run`);
   }
 
+  async runEnachCron(dryRun: boolean): Promise<ApiResponse<any>> {
+    return this.request('POST', '/cron/enach/run', { dryRun });
+  }
+
   async enableCronTask(taskName: string): Promise<ApiResponse<any>> {
     return this.request('POST', `/cron/task/${taskName}/enable`);
   }

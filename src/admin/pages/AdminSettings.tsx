@@ -603,6 +603,8 @@ export function AdminSettings() {
   const [logEntries, setLogEntries] = useState<any[]>([]);
   const [loadingCron, setLoadingCron] = useState(false);
   const [deletingLogs, setDeletingLogs] = useState(false);
+  const [enachRunResult, setEnachRunResult] = useState<any>(null);
+  const [enachRunning, setEnachRunning] = useState(false);
   const [showTestModal, setShowTestModal] = useState(false);
   const [testingConfig, setTestingConfig] = useState<ApiConfig | null>(null);
   const [userConfig, setUserConfig] = useState<UserConfigData | null>(null);
@@ -2304,6 +2306,22 @@ export function AdminSettings() {
       }
     } catch (error: any) {
       alert(error.response?.data?.message || 'Failed to disable task');
+    }
+  };
+
+  const handleRunEnachCron = async (dryRun: boolean) => {
+    const label = dryRun ? 'Dry Run' : 'Live Run';
+    if (!dryRun && !confirm(`This will attempt REAL eNACH charges for all eligible overdue loans. Continue?`)) return;
+    setEnachRunning(true);
+    setEnachRunResult(null);
+    try {
+      const response = await adminApiService.runEnachCron(dryRun);
+      setEnachRunResult({ ...response, dryRun, triggeredAt: new Date().toLocaleString('en-IN') });
+      fetchCronStatus();
+    } catch (error: any) {
+      setEnachRunResult({ success: false, dryRun, error: error.response?.data?.message || error.message, triggeredAt: new Date().toLocaleString('en-IN') });
+    } finally {
+      setEnachRunning(false);
     }
   };
 
@@ -4627,6 +4645,98 @@ export function AdminSettings() {
         {/* Cron Management Tab */}
         {activeTab === 'cron' && (
           <div className="space-y-6">
+
+            {/* eNACH Manual Trigger Panel */}
+            <div className="bg-white rounded-lg shadow p-6 border-l-4 border-blue-500">
+              <div className="flex items-center gap-2 mb-4">
+                <CreditCard className="w-5 h-5 text-blue-600" />
+                <h3 className="text-lg font-semibold text-gray-900">eNACH Auto-Debit — Manual Trigger</h3>
+              </div>
+              <p className="text-sm text-gray-500 mb-4">
+                Scans all active loans with DPD ≥ 1, presents the oldest unpaid EMI (full outstanding = base + penalty). 3-day cooldown between presentations per EMI.
+              </p>
+              <div className="flex items-center gap-3 flex-wrap">
+                <button
+                  onClick={() => handleRunEnachCron(true)}
+                  disabled={enachRunning}
+                  className="flex items-center gap-2 px-4 py-2 bg-yellow-500 text-white rounded-md hover:bg-yellow-600 disabled:opacity-50 transition-colors"
+                >
+                  <RefreshCw className={`w-4 h-4 ${enachRunning ? 'animate-spin' : ''}`} />
+                  Dry Run (no charges)
+                </button>
+                <button
+                  onClick={() => handleRunEnachCron(false)}
+                  disabled={enachRunning}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 transition-colors"
+                >
+                  <Play className="w-4 h-4" />
+                  Run Live (real charges)
+                </button>
+              </div>
+
+              {/* Result panel */}
+              {enachRunResult && (
+                <div className={`mt-4 p-4 rounded-lg border text-sm ${enachRunResult.success ? (enachRunResult.dryRun ? 'bg-yellow-50 border-yellow-200' : 'bg-green-50 border-green-200') : 'bg-red-50 border-red-200'}`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className={`px-2 py-0.5 rounded text-xs font-semibold ${enachRunResult.dryRun ? 'bg-yellow-200 text-yellow-800' : 'bg-green-200 text-green-800'}`}>
+                      {enachRunResult.dryRun ? 'DRY RUN' : 'LIVE'}
+                    </span>
+                    <span className="text-gray-500">{enachRunResult.triggeredAt}</span>
+                  </div>
+                  {enachRunResult.success ? (
+                    <div className="space-y-1">
+                      <p className="font-medium text-gray-900">{enachRunResult.message}</p>
+                      {enachRunResult.result && (
+                        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mt-2">
+                          {[
+                            { label: 'Scanned', value: enachRunResult.result.scanned, color: 'text-gray-700' },
+                            { label: 'Attempted', value: enachRunResult.result.attempted, color: 'text-blue-700' },
+                            { label: 'Success', value: enachRunResult.result.success, color: 'text-green-700' },
+                            { label: 'Pending', value: enachRunResult.result.pending, color: 'text-yellow-700' },
+                            { label: 'Failed', value: enachRunResult.result.failed, color: 'text-red-700' },
+                            { label: 'Skipped', value: enachRunResult.result.skipped, color: 'text-gray-500' },
+                          ].map(({ label, value, color }) => (
+                            <div key={label} className="bg-white border border-gray-200 rounded p-2 text-center">
+                              <p className={`text-lg font-bold ${color}`}>{value ?? 0}</p>
+                              <p className="text-xs text-gray-500">{label}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* Dry run details */}
+                      {enachRunResult.dryRun && enachRunResult.result?.skippedDetails?.length > 0 && (
+                        <details className="mt-3">
+                          <summary className="cursor-pointer text-yellow-700 font-medium text-xs">Would-be presentations ({enachRunResult.result.skippedDetails.filter((d: any) => d.reason === 'dry_run').length})</summary>
+                          <div className="mt-2 overflow-x-auto">
+                            <table className="min-w-full text-xs divide-y divide-gray-200">
+                              <thead><tr className="bg-gray-50">
+                                <th className="px-2 py-1 text-left">Loan ID</th>
+                                <th className="px-2 py-1 text-left">EMI</th>
+                                <th className="px-2 py-1 text-left">DPD</th>
+                                <th className="px-2 py-1 text-right">Amount</th>
+                              </tr></thead>
+                              <tbody className="divide-y divide-gray-100">
+                                {enachRunResult.result.skippedDetails.filter((d: any) => d.reason === 'dry_run').map((d: any, i: number) => (
+                                  <tr key={i} className="hover:bg-gray-50">
+                                    <td className="px-2 py-1">{d.loan_application_id}</td>
+                                    <td className="px-2 py-1">EMI {d.emi_number}</td>
+                                    <td className="px-2 py-1">{d.dpd}d</td>
+                                    <td className="px-2 py-1 text-right">₹{Number(d.amount).toFixed(2)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </details>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-red-700 font-medium">{enachRunResult.error || 'Run failed'}</p>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="bg-white rounded-lg shadow p-6">
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-lg font-semibold text-gray-900">Cron Job Management</h3>

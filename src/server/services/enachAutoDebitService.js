@@ -8,6 +8,9 @@ const {
 const AUTO_DEBIT_ENABLED = String(process.env.ENACH_AUTO_DEBIT_ENABLED || 'false').toLowerCase() === 'true';
 const AUTO_DEBIT_DRY_RUN = String(process.env.ENACH_AUTO_DEBIT_DRY_RUN || 'false').toLowerCase() === 'true';
 
+// After any non-SKIPPED presentation attempt, do not re-present the same EMI for this many days
+const COOLDOWN_DAYS = 3;
+
 // ─── Date helpers ────────────────────────────────────────────────────────────
 
 /**
@@ -307,12 +310,13 @@ async function getEligibleLoansForToday(todayStr) {
 // ─── Run management (per-day idempotency) ────────────────────────────────────
 
 /**
- * Ensures we don't double-charge an EMI:
- *  1. If any prior run for this loan+EMI is SUCCESS → skip (already paid via NACH)
- *  2. If today's run already exists and is PENDING or SUCCESS → skip (in-flight or done)
- *  3. Otherwise insert a fresh PENDING row for today and return its id.
+ * Ensures we don't over-present the same EMI:
+ *  1. Any SUCCESS run (any date) → skip; EMI is already paid via NACH.
+ *  2. Any non-SKIPPED run within the last COOLDOWN_DAYS → skip; 3-day cooldown.
+ *  3. Today's run already exists (PENDING/SUCCESS) → skip; in-flight or done.
+ *  4. Otherwise insert a fresh PENDING row for today and return its id.
  *
- * Returns { skip: true, reason } or { skip: false, runId }.
+ * Returns { skip: true, reason, lastRunDate? } or { skip: false, runId }.
  */
 async function getOrCreatePresentationRun(candidate, presentationDateStr) {
   // 1. Already paid via NACH on any previous day?
@@ -326,7 +330,26 @@ async function getOrCreatePresentationRun(candidate, presentationDateStr) {
     return { skip: true, reason: 'already_paid' };
   }
 
-  // 2. Already presented today?
+  // 2. 3-day cooldown — was this EMI presented (non-SKIPPED) within the last COOLDOWN_DAYS?
+  const recentRuns = await executeQuery(
+    `SELECT id, status, presentation_date
+     FROM enach_auto_debit_runs
+     WHERE loan_application_id = ? AND emi_number = ?
+       AND status NOT IN ('SKIPPED')
+       AND presentation_date >= DATE_SUB(?, INTERVAL ? DAY)
+     ORDER BY presentation_date DESC
+     LIMIT 1`,
+    [candidate.loan_application_id, candidate.dueEmi.emiNumber, presentationDateStr, COOLDOWN_DAYS]
+  );
+  if (recentRuns && recentRuns.length > 0) {
+    const last = recentRuns[0];
+    // Allow if the only recent run is today itself (handled in step 3 below)
+    if (last.presentation_date !== presentationDateStr) {
+      return { skip: true, reason: `cooldown_${COOLDOWN_DAYS}d`, lastRunDate: last.presentation_date };
+    }
+  }
+
+  // 3. Already presented today?
   const todayRuns = await executeQuery(
     `SELECT id, status FROM enach_auto_debit_runs
      WHERE loan_application_id = ? AND emi_number = ? AND presentation_date = ?
@@ -335,16 +358,10 @@ async function getOrCreatePresentationRun(candidate, presentationDateStr) {
   );
   if (todayRuns && todayRuns.length > 0) {
     const existing = todayRuns[0];
-    // PENDING = payment in-flight, let recheckPendingAutoDebitCharges handle it
-    // SUCCESS = already settled today
-    if (existing.status === 'PENDING' || existing.status === 'SUCCESS') {
-      return { skip: true, reason: `already_${existing.status.toLowerCase()}` };
-    }
-    // FAILED or SKIPPED: one attempt per scheduled window per day — skip until next day
-    return { skip: true, reason: 'already_attempted_today' };
+    return { skip: true, reason: `already_${existing.status.toLowerCase()}_today` };
   }
 
-  // 3. Insert a new run for today
+  // 4. Insert a new run for today
   const insertResult = await executeQuery(
     `INSERT INTO enach_auto_debit_runs
      (loan_application_id, user_id, db_subscription_id, subscription_id,
@@ -391,25 +408,31 @@ async function updateRunById(runId, updates) {
 // ─── Main debit runner ────────────────────────────────────────────────────────
 
 /**
- * Core function called by all four cron triggers:
+ * Core function called by all cron triggers and admin manual runs.
  *   • Daily at 18:59 IST  (DPD ≥ 1 + salary-date presentations)
  *   • 1st of month at 04:00 IST
  *   • 5th of month at 04:00 IST
+ *   • Admin manual trigger (with optional forceDryRun override)
  *
  * Logic:
  *   1. Finds all active loans with an unpaid overdue EMI (DPD ≥ 1).
  *   2. Applies Case 1 / Case 2 naturally: `getFirstOverdueEmi` always returns
  *      the OLDEST unpaid EMI, so EMI 2 is never presented while EMI 1 is pending.
  *   3. Computes full outstanding (base instalment + accrued penalty) for the EMI.
- *   4. Ensures one presentation attempt per EMI per calendar day (IST).
+ *   4. Enforces COOLDOWN_DAYS between consecutive presentations of the same EMI.
  *   5. Charges the mandate for the full outstanding amount.
+ *
+ * @param {object} options
+ * @param {boolean} [options.forceDryRun] - When true, overrides env and runs in dry-run mode
  */
-async function runDueDateAutoDebit() {
+async function runDueDateAutoDebit({ forceDryRun = false } = {}) {
   await initializeDatabase();
   await ensureAutoDebitRunsTable();
 
-  if (!AUTO_DEBIT_ENABLED) {
-    return { enabled: false, dryRun: AUTO_DEBIT_DRY_RUN, scanned: 0, attempted: 0, success: 0, pending: 0, failed: 0, skipped: 0 };
+  const isDryRun = forceDryRun || AUTO_DEBIT_DRY_RUN;
+
+  if (!AUTO_DEBIT_ENABLED && !forceDryRun) {
+    return { enabled: false, dryRun: isDryRun, scanned: 0, attempted: 0, success: 0, pending: 0, failed: 0, skipped: 0 };
   }
 
   const todayStr = getTodayISTDateStr();
@@ -420,24 +443,28 @@ async function runDueDateAutoDebit() {
   let pending = 0;
   let failed = 0;
   let skipped = 0;
+  const skippedDetails = [];
+  const attemptedDetails = [];
 
   for (const candidate of candidates) {
-    const { skip, reason, runId } = await getOrCreatePresentationRun(candidate, todayStr);
+    const { skip, reason, lastRunDate, runId } = await getOrCreatePresentationRun(candidate, todayStr);
 
     if (skip) {
       console.log(
-        `[eNACH] Skipping loan ${candidate.loan_application_id} EMI ${candidate.dueEmi.emiNumber}: ${reason}`
+        `[eNACH] Skipping loan ${candidate.loan_application_id} EMI ${candidate.dueEmi.emiNumber}: ${reason}${lastRunDate ? ` (last run: ${lastRunDate})` : ''}`
       );
       skipped++;
+      skippedDetails.push({ loan_application_id: candidate.loan_application_id, emi_number: candidate.dueEmi.emiNumber, reason, lastRunDate });
       continue;
     }
 
-    if (AUTO_DEBIT_DRY_RUN) {
+    if (isDryRun) {
       await updateRunById(runId, {
         status: 'SKIPPED',
         requestData: { mode: 'DRY_RUN', amount: candidate.dueEmi.amount, penalty: candidate.dueEmi.penaltyAmount, dpd: candidate.dueEmi.daysOverdue }
       });
       skipped++;
+      skippedDetails.push({ loan_application_id: candidate.loan_application_id, emi_number: candidate.dueEmi.emiNumber, reason: 'dry_run', amount: candidate.dueEmi.amount, dpd: candidate.dueEmi.daysOverdue });
       continue;
     }
 
@@ -451,6 +478,15 @@ async function runDueDateAutoDebit() {
     });
 
     const chargeStatus = String(chargeResult.status || '').toUpperCase();
+    const detail = {
+      loan_application_id: candidate.loan_application_id,
+      application_number: candidate.application_number,
+      emi_number: candidate.dueEmi.emiNumber,
+      due_date: candidate.dueEmi.dueDate,
+      dpd: candidate.dueEmi.daysOverdue,
+      amount: candidate.dueEmi.amount,
+      penalty: candidate.dueEmi.penaltyAmount
+    };
 
     if (!chargeResult.success || chargeStatus === 'FAILED') {
       failed++;
@@ -462,6 +498,7 @@ async function runDueDateAutoDebit() {
         responseData: chargeResult.response || {},
         lastError: chargeResult.error || 'Charge request failed'
       });
+      attemptedDetails.push({ ...detail, status: 'FAILED', error: chargeResult.error });
       continue;
     }
 
@@ -479,6 +516,7 @@ async function runDueDateAutoDebit() {
         requestData: { amount: candidate.dueEmi.amount, penalty: candidate.dueEmi.penaltyAmount, dpd: candidate.dueEmi.daysOverdue },
         responseData: chargeResult.response || {}
       });
+      attemptedDetails.push({ ...detail, status: 'SUCCESS', paymentId: chargeResult.paymentId });
     } else {
       // PENDING — Cashfree accepted but not yet settled; recheck job will follow up
       pending++;
@@ -489,18 +527,23 @@ async function runDueDateAutoDebit() {
         requestData: { amount: candidate.dueEmi.amount, penalty: candidate.dueEmi.penaltyAmount, dpd: candidate.dueEmi.daysOverdue },
         responseData: chargeResult.response || {}
       });
+      attemptedDetails.push({ ...detail, status: 'PENDING', paymentId: chargeResult.paymentId });
     }
   }
 
   return {
-    enabled: true,
-    dryRun: AUTO_DEBIT_DRY_RUN,
+    enabled: AUTO_DEBIT_ENABLED,
+    dryRun: isDryRun,
+    presentationDate: todayStr,
+    cooldownDays: COOLDOWN_DAYS,
     scanned: candidates.length,
     attempted,
     success,
     pending,
     failed,
-    skipped
+    skipped,
+    attempts: attemptedDetails,
+    skippedDetails
   };
 }
 

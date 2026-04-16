@@ -4,11 +4,19 @@ const {
   recheckPendingAutoDebitCharges
 } = require('../services/enachAutoDebitService');
 
-async function runAutoEnachDueDateJob() {
+/**
+ * @param {object} [options]
+ * @param {boolean} [options.forceDryRun] - When true runs in dry-run mode regardless of env
+ */
+async function runAutoEnachDueDateJob(options = {}) {
   const start = Date.now();
   try {
-    const result = await runDueDateAutoDebit();
-    await cronLogger.info(`Auto eNACH due-date job completed in ${Date.now() - start}ms`, result);
+    const result = await runDueDateAutoDebit(options);
+    await cronLogger.info(
+      `Auto eNACH due-date job completed in ${Date.now() - start}ms` +
+      (result.dryRun ? ' [DRY RUN]' : ''),
+      result
+    );
     return { success: true, ...result, duration: Date.now() - start };
   } catch (error) {
     await cronLogger.error(`Auto eNACH due-date job failed: ${error.message}`, error);

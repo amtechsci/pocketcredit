@@ -88,6 +88,32 @@ router.get('/task/:name', authenticateAdmin, async (req, res) => {
   });
 
   /**
+   * POST /api/admin/cron/enach/run
+   * Manually trigger the eNACH auto-debit job with optional dry-run override.
+   * Body: { dryRun: boolean }
+   */
+  router.post('/enach/run', authenticateAdmin, async (req, res) => {
+    try {
+      const dryRun = req.body && req.body.dryRun === true;
+      const { runAutoEnachDueDateJob } = require('../jobs/autoEnachDueDateJob');
+      const result = await runAutoEnachDueDateJob({ forceDryRun: dryRun });
+      res.json({
+        success: true,
+        dryRun,
+        message: dryRun
+          ? `eNACH dry run complete — ${result.scanned} loan(s) scanned, ${result.skipped} skipped`
+          : `eNACH run complete — ${result.attempted} attempted, ${result.success} success, ${result.pending} pending, ${result.failed} failed`,
+        result
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: `eNACH run failed: ${error.message}`
+      });
+    }
+  });
+
+  /**
    * POST /api/admin/cron/task/:name/enable
    * Enable a cron job
    */
