@@ -412,13 +412,16 @@ const fetchDashboardData = async (userId) => {
   const hasPendingApplication = pendingApplications && pendingApplications.length > 0;
   const pendingApplicationInfo = hasPendingApplication ? pendingApplications[0] : null;
 
+  // If user has an active loan, suppress stale hold state in dashboard response.
+  // This prevents "cooling period" banner from showing for active account_manager users.
+  if (holdInfo && activeLoans.length > 0) {
+    holdInfo = null;
+  }
+
   // User can apply for new loan only if:
   // 1. They have no active loans AND no pending applications
   // 2. They are not on hold
-  // 3. Their loan limit is below ₹45,600 (cooling period threshold)
-  const userLoanLimit = parseFloat(user.loan_limit) || 0;
-  const isLimitAboveThreshold = userLoanLimit >= 45600;
-  const canApplyForLoan = !hasPendingApplication && (activeLoans.length === 0) && !isLimitAboveThreshold;
+  const canApplyForLoan = !hasPendingApplication && (activeLoans.length === 0);
 
   // Get recent notifications (notifications table doesn't exist yet)
   const notifications = [];

@@ -189,13 +189,9 @@ export function DynamicDashboardPage() {
         setDashboardData(response.data);
         const data = response.data as any;
         if (data.loan_status) {
-          // Also check loan_limit from user data as additional safety check
-          const userLoanLimit = parseFloat(data.user?.loan_limit) || 0;
-          const isLimitAboveThreshold = userLoanLimit >= 45600;
-          // User cannot apply if limit >= ₹45,600 OR if loan_status says they can't
-          setCanApplyForLoan(data.loan_status.can_apply && !isLimitAboveThreshold);
-          // Set cooling period flag for display
-          setIsInCoolingPeriod(isLimitAboveThreshold || (data.hold_info?.is_on_hold && data.hold_info?.hold_type === 'cooling_period'));
+          // Keep dashboard state aligned with backend loan_status / hold_info.
+          setCanApplyForLoan(Boolean(data.loan_status.can_apply));
+          setIsInCoolingPeriod(Boolean(data.hold_info?.is_on_hold && data.hold_info?.hold_type === 'cooling_period'));
         }
       } else if (response.status === 'profile_incomplete') {
         const incompleteData = response.data as any;
