@@ -1639,7 +1639,6 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 // to emi_schedule — compute it here using the same formula so the residual equals
                 // only the penalty+GST component.
                 if (bd) {
-                    const hasActualPenalty = parseFloat(row.penality_charge) > 0;
                     let emiPaidLate = false;
                     let emiBaseFromSchedule = null;
                     let emiDueDateStr = null;
@@ -1687,7 +1686,9 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                         } catch (e) { /* ignore parse errors */ }
                     }
 
-                    if (hasActualPenalty && emiPaidLate) {
+                    // Do not gate on la.processed_penalty: it often stays 0 while the paid EMI order
+                    // still includes penalty + GST (residual after base EMI + DPD). PLL641-style cases.
+                    if (emiPaidLate) {
                         let residualAfter = null;
                         if (emiBaseFromSchedule != null) {
                             // Primary: use stored base EMI amount — exactly what payment.js charged without penalty
