@@ -228,6 +228,7 @@ CREATE TABLE `digitap_bank_statements` (
   `digitap_url` text COLLATE utf8mb4_unicode_ci,
   `status` enum('pending','processing','completed','failed','ReportGenerated') COLLATE utf8mb4_unicode_ci DEFAULT 'pending',
   `report_data` longtext COLLATE utf8mb4_unicode_ci,
+  `report_xml` longtext COLLATE utf8mb4_unicode_ci COMMENT 'Raw AA/FI XML from Digitap',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -765,6 +766,7 @@ CREATE TABLE `user_bank_statements` (
   `status` enum('pending','processing','completed','failed','InProgress') COLLATE utf8mb4_unicode_ci DEFAULT 'pending',
   `transaction_data` json DEFAULT NULL,
   `report_data` longtext COLLATE utf8mb4_unicode_ci,
+  `report_xml` longtext COLLATE utf8mb4_unicode_ci COMMENT 'Raw AA/FI XML from Digitap',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Stores user bank statements - one per user (profile level)';

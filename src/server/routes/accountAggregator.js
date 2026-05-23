@@ -11,6 +11,7 @@ const {
   checkBankStatementStatus,
   retrieveBankStatementReport
 } = require('../services/digitapBankStatementService');
+const { fetchAndSaveBankStatementReports } = require('../utils/bankStatementReportStorage');
 
 /**
  * Helper function to log webhook payloads to database
@@ -497,29 +498,27 @@ router.post('/check-and-retrieve/:applicationId', requireAuth, async (req, res) 
         });
       }
 
-      // Retrieve report from Digitap
-      const reportResult = await retrieveBankStatementReport(statement.client_ref_num, 'json');
+      const saveResult = await fetchAndSaveBankStatementReports({
+        executeQuery,
+        clientRefNum: statement.client_ref_num,
+        table: 'digitap_bank_statements',
+        whereColumn: 'client_ref_num',
+        whereValue: statement.client_ref_num
+      });
 
-      if (!reportResult.success) {
+      if (!saveResult.success) {
         return res.status(500).json({
           success: false,
           message: 'Failed to retrieve report from Digitap'
         });
       }
 
-      // Save report to database
-      await executeQuery(
-        `UPDATE digitap_bank_statements 
-         SET report_data = ?, status = 'completed', updated_at = NOW() 
-         WHERE client_ref_num = ?`,
-        [JSON.stringify(reportResult.data.report), statement.client_ref_num]
-      );
-
       return res.json({
         success: true,
         data: {
           status: 'completed',
-          report: reportResult.data.report,
+          report: saveResult.report,
+          hasXml: !!saveResult.reportXml,
           cached: false
         }
       });
@@ -601,16 +600,15 @@ async function handleAAWebhook(req, res) {
     if (status === 'ReportGenerated') {
       console.log('📊 Report ready, fetching from Digitap...');
       
-      const reportResult = await retrieveBankStatementReport(client_ref_num, 'json');
-      
-      if (reportResult.success) {
-        await executeQuery(
-          `UPDATE digitap_bank_statements 
-           SET report_data = ?, status = 'completed', updated_at = NOW() 
-           WHERE client_ref_num = ?`,
-          [JSON.stringify(reportResult.data.report), client_ref_num]
-        );
-        
+      const saveResult = await fetchAndSaveBankStatementReports({
+        executeQuery,
+        clientRefNum: client_ref_num,
+        table: 'digitap_bank_statements',
+        whereColumn: 'client_ref_num',
+        whereValue: client_ref_num
+      });
+
+      if (saveResult.success) {
         console.log('✅ Report saved to database');
       }
     }

@@ -13,6 +13,12 @@ const axios = require('axios');
 const { generateKFSHTML } = require('../utils/kfsHtmlGenerator');
 const { generateLoanAgreementHTML } = require('../utils/loanAgreementHtmlGenerator');
 const { calculatePaymentAmount } = require('../utils/paymentAmount');
+const {
+  areAllEmisPaid,
+  applyPaymentToEmi,
+  evaluateLoanClearanceEligibility,
+  getEmiDueAmount
+} = require('../utils/loanClearance');
 const { v4: uuidv4 } = require('uuid');
 
 const router = express.Router();
@@ -3722,19 +3728,27 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
             
             if (unpaidEmiIndex !== -1) {
               const emiNumber = unpaidEmiIndex + 1;
-              console.log(`📌 Found unpaid EMI #${emiNumber} - marking as paid`);
-              
-              // Mark this EMI as paid
-              emiSchedule[unpaidEmiIndex].status = 'paid';
-              emiSchedule[unpaidEmiIndex].paid_date = new Date().toISOString().split('T')[0];
-              
-              // Update emi_schedule in database
+              const paymentAmount = parseFloat(amount) || 0;
+              const emiDue = getEmiDueAmount(emiSchedule[unpaidEmiIndex]);
+              const paidDate = txDate || new Date().toISOString().split('T')[0];
+
+              emiSchedule[unpaidEmiIndex] = applyPaymentToEmi(
+                emiSchedule[unpaidEmiIndex],
+                paymentAmount,
+                paidDate
+              );
+
+              const emiNowPaid = String(emiSchedule[unpaidEmiIndex].status || '').toLowerCase() === 'paid';
+              console.log(
+                emiNowPaid
+                  ? `📌 EMI #${emiNumber} fully paid (₹${paymentAmount} / due ₹${emiDue})`
+                  : `📌 EMI #${emiNumber} partial payment ₹${paymentAmount} recorded (due ₹${emiDue}) — EMI still pending`
+              );
+
               await executeQuery(
                 'UPDATE loan_applications SET emi_schedule = ?, updated_at = NOW() WHERE id = ?',
                 [JSON.stringify(emiSchedule), loanIdInt]
               );
-              
-              console.log(`✅ EMI #${emiNumber} marked as paid in emi_schedule`);
               
               // Also create/update payment_orders record to match payment validation logic
               // This ensures payment validation sees the paid status
@@ -3744,45 +3758,48 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
               else if (emiNumber === 3) paymentTypeSuffix = '3rd';
               else paymentTypeSuffix = `${emiNumber}th`;
               const paymentType = `emi_${paymentTypeSuffix}`;
-              const emiAmount = emiSchedule[unpaidEmiIndex].instalment_amount || emiSchedule[unpaidEmiIndex].emi_amount || 0;
-              
+              const orderAmount = paymentAmount;
+
               // Check if payment order already exists
               const existingOrders = await executeQuery(
                 'SELECT id FROM payment_orders WHERE loan_id = ? AND payment_type = ?',
                 [loanIdInt, paymentType]
               );
-              
+
               if (existingOrders.length > 0) {
                 // Update existing order to PAID
                 await executeQuery(
                   `UPDATE payment_orders 
                    SET status = 'PAID', amount = ?, updated_at = NOW() 
                    WHERE loan_id = ? AND payment_type = ?`,
-                  [emiAmount, loanIdInt, paymentType]
+                  [orderAmount, loanIdInt, paymentType]
                 );
-                console.log(`✅ Updated existing payment_order for ${paymentType} to PAID`);
+                console.log(`✅ Updated existing payment_order for ${paymentType} to PAID (₹${orderAmount})`);
               } else {
                 // Create new payment order record
                 const orderId = `ADMIN_${loan.application_number || loanIdInt}_${paymentType}_${Date.now()}`;
                 await executeQuery(
                   `INSERT INTO payment_orders (order_id, loan_id, user_id, amount, payment_type, status, created_at, updated_at)
                    VALUES (?, ?, ?, ?, ?, 'PAID', NOW(), NOW())`,
-                  [orderId, loanIdInt, userIdInt, emiAmount, paymentType]
+                  [orderId, loanIdInt, userIdInt, orderAmount, paymentType]
                 );
-                console.log(`✅ Created payment_order record for ${paymentType} with status PAID`);
+                console.log(`✅ Created payment_order record for ${paymentType} with status PAID (₹${orderAmount})`);
               }
 
               // Check if all EMIs are now paid
-              const allEmisPaid = emiSchedule.every(emi => emi.status === 'paid');
+              const allEmisPaid = areAllEmisPaid(emiSchedule);
               const totalEmis = emiSchedule.length;
-              const paidEmis = emiSchedule.filter(emi => emi.status === 'paid').length;
-              
-              console.log(`📊 EMI status: ${paidEmis}/${totalEmis} paid. All paid: ${allEmisPaid}`);
+              const paidEmis = emiSchedule.filter(emi => String(emi.status || '').toLowerCase() === 'paid').length;
 
-              if (allEmisPaid) {
-                // All EMIs paid - will trigger loan_cleared SMS below
-              } else {
-                // EMI paid but loan not fully cleared - trigger emi_cleared SMS
+              console.log(`📊 EMI status: ${paidEmis}/${totalEmis} fully paid. All paid: ${allEmisPaid}`);
+
+              const clearance = await evaluateLoanClearanceEligibility({
+                executeQuery,
+                loan: { ...loan, emi_schedule: emiSchedule },
+                emiSchedule
+              });
+
+              if (emiNowPaid && !clearance.shouldClear) {
                 try {
                   const { triggerEventSMS } = require('../utils/eventSmsTrigger');
                   await triggerEventSMS('emi_cleared', {
@@ -3794,16 +3811,11 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
                   });
                 } catch (smsError) {
                   console.error('❌ Error sending emi_cleared SMS (non-fatal):', smsError);
-                  // Don't fail - SMS failure shouldn't block payment processing
                 }
               }
 
-              if (allEmisPaid) {
-                // All EMIs paid - treat like full_payment: clear loan, send NOC, etc.
-                console.log(`💰 All ${totalEmis} EMIs paid - clearing loan and sending NOC`);
-
-                const closedAmount = parseFloat(loan.total_repayable) || 0;
-                // Use the EMI payment transaction date as closed_date so it matches actual last payment date
+              if (clearance.shouldClear) {
+                const closedAmount = clearance.amountDue || parseFloat(loan.total_repayable) || 0;
                 const closedDate = txDate;
                 await executeQuery(
                   `UPDATE loan_applications 
@@ -3812,7 +3824,9 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
                   [closedDate, closedAmount, loanIdInt]
                 );
 
-                console.log(`✅ Loan #${loanIdInt} marked as cleared (all EMIs paid)`);
+                console.log(
+                  `✅ Loan #${loanIdInt} marked as cleared (paid ₹${clearance.totalPaid} / due ₹${closedAmount})`
+                );
 
                 // Trigger automatic event-based SMS (loan_cleared)
                 try {
@@ -3969,7 +3983,10 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
                 loanStatusUpdated = true;
                 newStatus = 'cleared';
               } else {
-                console.log(`ℹ️ EMI #${emiNumber} paid. ${paidEmis}/${totalEmis} EMIs completed. Loan not yet fully paid.`);
+                const reason = clearance.reason || 'outstanding_remaining';
+                console.log(
+                  `ℹ️ Loan #${loanIdInt} not cleared after EMI #${emiNumber} payment (${reason}; paid ₹${clearance.totalPaid ?? 'n/a'} / due ₹${clearance.amountDue ?? 'n/a'})`
+                );
               }
             } else {
               console.log('ℹ️ All EMIs already paid for this loan');

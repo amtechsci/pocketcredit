@@ -27,6 +27,7 @@ interface ReportStats {
 type AmExportRow = {
   first_name?: string;
   last_name?: string;
+  total_loans?: number;
   principal_amount?: number;
   processed_amount?: number | null;
   exhausted_days?: number;
@@ -173,6 +174,7 @@ export function AdminReports() {
       const rows = (response.data.users || []) as AmExportRow[];
       const headers = [
         'Name',
+        'no. of loans',
         'principal loan',
         'processed amount',
         'exhausted days',
@@ -186,6 +188,7 @@ export function AdminReports() {
         const name = [row.first_name, row.last_name].filter(Boolean).join(' ').trim() || '—';
         const basePrefix = [
           csvEscape(name),
+          csvEscape(row.total_loans ?? 1),
           csvEscape(formatCsvNumber(row.principal_amount, 0)),
           csvEscape(formatCsvNumber(row.processed_amount ?? row.principal_amount, 2)),
           csvEscape(formatCsvNumber(row.exhausted_days, 0))

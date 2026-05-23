@@ -1083,12 +1083,48 @@ async function checkBankStatementStatus(request_id) {
   }
 }
 
+function extractXmlFromResponse(data) {
+  if (data == null) return null;
+
+  if (typeof data === 'string') {
+    const trimmed = data.trim();
+    if (trimmed.startsWith('<?xml') || trimmed.startsWith('<')) {
+      return data;
+    }
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        return extractXmlFromResponse(JSON.parse(data));
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  if (typeof data === 'object') {
+    for (const key of ['result', 'data', 'report', 'fi_data', 'xml', 'result_xml', 'source_report']) {
+      if (data[key]) {
+        const extracted = extractXmlFromResponse(data[key]);
+        if (extracted) return extracted;
+      }
+    }
+
+    for (const value of Object.values(data)) {
+      if (typeof value === 'string' && (value.includes('<?xml') || value.trim().startsWith('<'))) {
+        return value;
+      }
+    }
+  }
+
+  return null;
+}
+
 /**
  * Retrieve analyzed bank statement report
  * Only call this after status shows "ReportGenerated"
  * 
  * @param {string} client_ref_num - Reference number (optional if txn_id provided)
- * @param {string} format - Report format: 'json' or 'excel' (default: 'json')
+ * @param {string} format - Report format: 'json', 'xml', or 'xlsx' (default: 'json')
  * @param {string} txn_id - Transaction ID (optional, alternative to client_ref_num)
  * @returns {Promise<{success: boolean, data?: object, error?: string}>}
  */
@@ -1121,7 +1157,8 @@ async function retrieveBankStatementReport(client_ref_num = null, format = 'json
 
     console.log('📋 Retrieve Report Request Body:', JSON.stringify(requestBody, null, 2));
 
-    // For Excel format, we need to receive binary data
+    const responseType = format === 'xlsx' ? 'arraybuffer' : (format === 'xml' ? 'text' : 'json');
+
     const response = await axios.post(
       ENDPOINTS.RETRIEVE_REPORT,
       requestBody,
@@ -1130,12 +1167,37 @@ async function retrieveBankStatementReport(client_ref_num = null, format = 'json
           'Authorization': getAuthHeader(),
           'Content-Type': 'application/json'
         },
-        responseType: format === 'xlsx' ? 'arraybuffer' : 'json', // Binary for Excel, JSON for other formats
+        responseType,
         timeout: 30000
       }
     );
 
     console.log('✅ Report Retrieved, status:', response.status);
+
+    // Handle XML format (raw AA/FI data from Digitap)
+    if (format === 'xml') {
+      const xmlContent = extractXmlFromResponse(response.data);
+
+      if (xmlContent) {
+        console.log('✅ XML report received, size:', xmlContent.length, 'characters');
+        return {
+          success: true,
+          data: {
+            report: xmlContent,
+            client_ref_num: client_ref_num || null,
+            txn_id: txn_id || null,
+            format: 'xml',
+            message: 'XML report retrieved successfully'
+          }
+        };
+      }
+
+      return {
+        success: false,
+        error: 'No XML data received from Digitap',
+        statusCode: response.status
+      };
+    }
     
     // Handle Excel format (binary response)
     if (format === 'xlsx') {

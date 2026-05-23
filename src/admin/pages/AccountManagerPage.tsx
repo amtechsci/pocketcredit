@@ -165,6 +165,7 @@ export function AccountManagerPage() {
       const rows: AccountManagerUser[] = response.data.users || [];
       const headers = [
         'Name',
+        'no. of loans',
         'primary number',
         'alt number',
         'primary mail',
@@ -185,6 +186,7 @@ export function AccountManagerPage() {
         const altMail = row.personal_email || row.official_email || '';
         const basePrefix = [
           csvEscape(name),
+          csvEscape(row.total_loans ?? 1),
           csvEscape(row.phone || ''),
           csvEscape(row.alternate_mobile || ''),
           csvEscape(primaryMail),

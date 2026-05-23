@@ -1,6 +1,12 @@
 const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
 const { executeQuery, initializeDatabase } = require('../config/database');
+const {
+  parseEmiSchedule,
+  applyPaymentToEmi,
+  evaluateLoanClearanceEligibility,
+  recordEnachLedgerTransaction
+} = require('../utils/loanClearance');
 
 const CASHFREE_API_BASE = process.env.CASHFREE_API_BASE || 'https://sandbox.cashfree.com/pg';
 const CASHFREE_CLIENT_ID = process.env.CASHFREE_CLIENT_ID;
@@ -148,10 +154,29 @@ async function fetchChargeStatus(subscriptionId, paymentId) {
   return response.data || {};
 }
 
+async function resolveEnachBankReference(paymentId) {
+  const rows = await executeQuery(
+    `SELECT cf_payment_id, response_data FROM enach_charge_requests WHERE payment_id = ? LIMIT 1`,
+    [paymentId]
+  );
+  if (!rows?.length) return paymentId;
+
+  const row = rows[0];
+  if (row.cf_payment_id) return String(row.cf_payment_id);
+
+  const response = parseJson(row.response_data, {});
+  return (
+    response.bank_reference ||
+    response.payment_utr ||
+    response.utr ||
+    paymentId
+  );
+}
+
 async function applySuccessfulChargeToLoan({ loanApplicationId, paymentId, amount }) {
   await initializeDatabase();
   const loans = await executeQuery(
-    `SELECT id, status, user_id, emi_schedule, total_repayable
+    `SELECT id, status, user_id, application_number, emi_schedule, total_repayable
      FROM loan_applications
      WHERE id = ?`,
     [loanApplicationId]
@@ -188,11 +213,10 @@ async function applySuccessfulChargeToLoan({ loanApplicationId, paymentId, amoun
     return { updated: false, reason: 'no_unpaid_due_emi' };
   }
 
-  schedule[targetIndex] = {
-    ...schedule[targetIndex],
-    status: 'paid',
-    paid_date: todayStr
-  };
+  const chargeAmount = Number(amount) || 0;
+  schedule[targetIndex] = applyPaymentToEmi(schedule[targetIndex], chargeAmount, todayStr);
+  const emiNumber = targetIndex + 1;
+  const emiFullyPaid = String(schedule[targetIndex].status || '').toLowerCase() === 'paid';
 
   await executeQuery(
     `UPDATE loan_applications
@@ -209,17 +233,45 @@ async function applySuccessfulChargeToLoan({ loanApplicationId, paymentId, amoun
     await executeQuery(
       `INSERT INTO loan_payments (loan_id, amount, payment_method, transaction_id, status, payment_date)
        VALUES (?, ?, 'ENACH', ?, 'SUCCESS', NOW())`,
-      [loanApplicationId, Number(amount) || 0, paymentId]
+      [loanApplicationId, chargeAmount, paymentId]
     );
   }
 
-  const allPaid = schedule.every((emi) => String(emi.status || '').toLowerCase() === 'paid');
-  if (allPaid && loan.status === 'account_manager') {
+  loan.emi_schedule = schedule;
+
+  try {
+    const bankReference = await resolveEnachBankReference(paymentId);
+    const ledger = await recordEnachLedgerTransaction({
+      executeQuery,
+      loan,
+      paymentId,
+      amount: chargeAmount,
+      emiNumber,
+      bankReference
+    });
+    if (ledger.created) {
+      console.log(`[eNACH] Ledger transaction created for loan #${loanApplicationId} (${ledger.transactionType})`);
+    }
+  } catch (ledgerErr) {
+    console.error('[eNACH] Failed to create transactions ledger row (non-fatal):', ledgerErr.message);
+  }
+
+  const clearance = await evaluateLoanClearanceEligibility({
+    executeQuery,
+    loan,
+    emiSchedule: schedule
+  });
+
+  if (clearance.shouldClear) {
+    const closedAmount = clearance.amountDue || Number(loan.total_repayable) || 0;
     await executeQuery(
       `UPDATE loan_applications
        SET status = 'cleared', closed_date = CURDATE(), closed_amount = ?, updated_at = NOW()
        WHERE id = ?`,
-      [Number(loan.total_repayable) || 0, loanApplicationId]
+      [closedAmount, loanApplicationId]
+    );
+    console.log(
+      `[eNACH] Loan #${loanApplicationId} cleared — paid ₹${clearance.totalPaid} / due ₹${clearance.amountDue}`
     );
     try {
       const { runCoolingPeriodCheckAfterLoanClear } = require('../utils/creditLimitCalculator');
@@ -230,9 +282,25 @@ async function applySuccessfulChargeToLoan({ loanApplicationId, paymentId, amoun
     } catch (e) {
       console.error('❌ Error checking cooling period after eNACH loan clearance (non-fatal):', e);
     }
+  } else if (emiFullyPaid) {
+    console.log(
+      `[eNACH] EMI #${emiNumber} fully paid for loan #${loanApplicationId}; loan not cleared (${clearance.reason})`
+    );
+  } else {
+    console.log(
+      `[eNACH] Partial eNACH ₹${chargeAmount} applied to EMI #${emiNumber} on loan #${loanApplicationId} — EMI still pending`
+    );
   }
 
-  return { updated: true, emiNumber: targetIndex + 1, allPaid };
+  return {
+    updated: true,
+    emiNumber,
+    emiFullyPaid,
+    loanCleared: clearance.shouldClear,
+    clearanceReason: clearance.reason || null,
+    totalPaid: clearance.totalPaid,
+    amountDue: clearance.amountDue
+  };
 }
 
 module.exports = {

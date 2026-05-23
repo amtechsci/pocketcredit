@@ -9,6 +9,7 @@ const { executeQuery } = require('../config/database');
 const cashfreePayment = require('../services/cashfreePayment');
 const { authenticateToken } = require('../middleware/auth');
 const { calculatePaymentAmount } = require('../utils/paymentAmount');
+const { shouldClearLoanAfterPayment, markAllEmisPaid, getEmiNumberFromPaymentType, markEmiPaidInSchedule, shouldSendEmiClearedSms, evaluateBackupLoanClearance, evaluateLoanClearanceEligibility, resolveClosedAmount } = require('../utils/loanClearance');
 
 /**
  * Extract UTR/reference from payment object. Prefers actual UTR fields; avoids using
@@ -625,59 +626,46 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                         });
                     }
                     
-                    // Even if payment is processed, check if loan should be cleared
+                    // Backup clearance if webhook missed it — never use extension outstanding balance here.
                     try {
                         const loanDetails = await executeQuery(
-                            `SELECT 
-                                id, user_id, processed_amount, loan_amount, total_repayable,
-                                processed_post_service_fee, fees_breakdown, plan_snapshot,
-                                status
-                            FROM loan_applications 
-                            WHERE id = ?`,
+                            `SELECT id, user_id, total_repayable, emi_schedule, status
+                             FROM loan_applications
+                             WHERE id = ?`,
                             [loanId]
                         );
 
                         if (loanDetails.length > 0) {
                             const loan = loanDetails[0];
-                            
-                            // Only check for cleared status if loan is in account_manager or overdue status
-                            if (loan.status === 'account_manager' || loan.status === 'overdue') {
-                                // Calculate total payments made for this loan
-                                const totalPaymentsResult = await executeQuery(
-                                    `SELECT COALESCE(SUM(amount), 0) as total_paid 
-                                     FROM loan_payments 
-                                     WHERE loan_id = ? AND status = 'SUCCESS'`,
-                                    [loanId]
-                                );
-                                
-                                const totalPaid = parseFloat(totalPaymentsResult[0]?.total_paid || 0);
-                                
-                                // Calculate outstanding balance
-                                const { calculateOutstandingBalance } = require('../utils/extensionCalculations');
-                                const outstandingBalance = calculateOutstandingBalance(loan);
-                                
-                                console.log(`💰 Checking if loan #${loanId} should be cleared:`, {
-                                    totalPaid: totalPaid,
-                                    outstandingBalance: outstandingBalance,
-                                    remaining: outstandingBalance - totalPaid
+
+                            if (['account_manager', 'overdue', 'default', 'delinquent'].includes(loan.status)) {
+                                const clearance = await evaluateBackupLoanClearance({
+                                    executeQuery,
+                                    loan,
+                                    paymentType: existingOrder.payment_type
                                 });
-                                
-                                // If total payments >= outstanding balance (with small tolerance for rounding)
-                                if (totalPaid >= outstandingBalance - 0.01) {
-                                    const closedAmount = parseFloat(loan.total_repayable) || outstandingBalance;
-                                    // Mark loan as cleared and set closed_date/closed_amount for correct display
+
+                                if (clearance.shouldClear) {
+                                    const closedAmount = resolveClosedAmount(clearance, loan);
+                                    const todayStr = new Date().toISOString().split('T')[0];
+                                    let updateSet = `status = 'cleared', closed_date = CURDATE(), closed_amount = ?, updated_at = NOW()`;
+                                    let updateParams = [closedAmount, loanId];
+
+                                    if (loan.emi_schedule) {
+                                        const emiArr = markAllEmisPaid(loan.emi_schedule, todayStr);
+                                        if (emiArr) {
+                                            updateSet = `emi_schedule = ?, status = 'cleared', closed_date = CURDATE(), closed_amount = ?, updated_at = NOW()`;
+                                            updateParams = [JSON.stringify(emiArr), closedAmount, loanId];
+                                        }
+                                    }
+
                                     await executeQuery(
-                                        `UPDATE loan_applications 
-                                         SET status = 'cleared', closed_date = CURDATE(), closed_amount = ?, updated_at = NOW() 
-                                         WHERE id = ?`,
-                                        [closedAmount, loanId]
+                                        `UPDATE loan_applications SET ${updateSet} WHERE id = ?`,
+                                        updateParams
                                     );
-                                    
-                                    console.log(`✅ Loan #${loanId} fully paid and marked as CLEARED`);
-                                    
-                                    // Credit limit recalculation removed - now happens on loan disbursement, not on loan clearance
-                                    
-                                    // Trigger automatic event-based SMS (loan_cleared)
+
+                                    console.log(`✅ Loan #${loanId} marked as CLEARED (backup check, ${existingOrder.payment_type})`);
+
                                     try {
                                         const { triggerEventSMS } = require('../utils/eventSmsTrigger');
                                         await triggerEventSMS('loan_cleared', {
@@ -686,33 +674,25 @@ router.post('/create-order', authenticateToken, async (req, res) => {
                                         });
                                     } catch (smsError) {
                                         console.error('❌ Error sending loan_cleared SMS (non-fatal):', smsError);
-                                        // Don't fail - SMS failure shouldn't block loan clearance
                                     }
-                                    
-                                    // Check if user should be moved to cooling period after clearing this loan
+
                                     try {
                                         const { runCoolingPeriodCheckAfterLoanClear } = require('../utils/creditLimitCalculator');
-                                        const cooled = await runCoolingPeriodCheckAfterLoanClear(loan.user_id, loanId);
-                                        if (cooled) {
-                                            console.log(`[Payment] User ${loan.user_id} moved to cooling period after clearing loan #${loanId}`);
-                                        }
+                                        await runCoolingPeriodCheckAfterLoanClear(loan.user_id, loanId);
                                     } catch (coolingPeriodError) {
                                         console.error('❌ Error checking cooling period after loan clearance (non-fatal):', coolingPeriodError);
                                     }
-                                    
-                                    // Send NOC email to user
+
                                     try {
                                         await generateAndSendNOCEmail(loanId);
                                     } catch (nocEmailError) {
                                         console.error('❌ Error sending NOC email (non-fatal):', nocEmailError);
-                                        // Don't fail - email failure shouldn't block loan clearance
                                     }
                                 }
                             }
                         }
                     } catch (clearanceError) {
                         console.error('❌ Error checking if loan should be cleared:', clearanceError);
-                        // Don't fail the response, just log the error
                     }
                     
                     return res.json({
@@ -1454,83 +1434,67 @@ router.post('/webhook', async (req, res) => {
                             // (Skip if already cleared by order-status check)
                             if (['account_manager', 'overdue', 'default', 'delinquent'].includes(loan.status)) {
                                 let shouldClearLoan = false;
-                                
+                                let clearanceResult = null;
+
                                 // Pre-close or full_payment: Immediately clear the loan
                                 if (paymentType === 'pre-close' || paymentType === 'full_payment') {
                                     shouldClearLoan = true;
+                                    clearanceResult = { closedAmount: parseFloat(loan.total_repayable) || 0 };
                                     console.log(`💰 ${paymentType === 'pre-close' ? 'Pre-close' : 'Full payment'} received - loan will be cleared immediately`);
                                 } else if (paymentType.startsWith('emi_')) {
-                                    // EMI payment: Only clear if this is the last EMI
-                                    // Parse plan snapshot to get EMI count
-                                    let planSnapshot = {};
-                                    let emiCount = 1;
+                                    const currentEmiNumber = getEmiNumberFromPaymentType(paymentType);
+                                    let emiScheduleUpdated = false;
+                                    let emiFullyPaid = false;
+                                    let emiScheduleArray = null;
+
                                     try {
-                                        planSnapshot = typeof loan.plan_snapshot === 'string' 
-                                            ? JSON.parse(loan.plan_snapshot) 
-                                            : loan.plan_snapshot || {};
-                                        emiCount = planSnapshot.emi_count || 1;
-                                    } catch (e) {
-                                        console.error('Error parsing plan_snapshot:', e);
-                                    }
-                                    
-                                    // Determine which EMI this is
-                                    let currentEmiNumber = 0;
-                                    if (paymentType === 'emi_1st') currentEmiNumber = 1;
-                                    else if (paymentType === 'emi_2nd') currentEmiNumber = 2;
-                                    else if (paymentType === 'emi_3rd') currentEmiNumber = 3;
-                                    else if (paymentType === 'emi_4th') currentEmiNumber = 4;
-                                    
-                                    // Update emi_schedule to mark this EMI as paid
-                                    try {
-                                        let emiSchedule = loan.emi_schedule;
-                                        if (emiSchedule) {
-                                            let emiScheduleArray = null;
-                                            try {
-                                                emiScheduleArray = typeof emiSchedule === 'string' 
-                                                    ? JSON.parse(emiSchedule) 
-                                                    : emiSchedule;
-                                            } catch (parseError) {
-                                                console.error('Error parsing emi_schedule:', parseError);
-                                            }
-                                            
-                                            if (Array.isArray(emiScheduleArray) && emiScheduleArray.length >= currentEmiNumber) {
-                                                // Update the status of the corresponding EMI (0-indexed array)
-                                                const emiIndex = currentEmiNumber - 1;
-                                                emiScheduleArray[emiIndex] = {
-                                                    ...emiScheduleArray[emiIndex],
-                                                    status: 'paid',
-                                                    paid_date: new Date().toISOString().split('T')[0],
-                                                    paid_amount: parseFloat(paymentOrder.amount) || null
-                                                };
-                                                
-                                                // Update emi_schedule in database
-                                                await executeQuery(
-                                                    `UPDATE loan_applications 
-                                                     SET emi_schedule = ? 
-                                                     WHERE id = ?`,
-                                                    [JSON.stringify(emiScheduleArray), paymentOrder.loan_id]
-                                                );
-                                                
-                                                console.log(`✅ Updated emi_schedule: EMI #${currentEmiNumber} marked as paid`);
-                                            } else {
-                                                console.warn(`⚠️ emi_schedule array not found or invalid for EMI #${currentEmiNumber}`);
-                                            }
+                                        const markResult = markEmiPaidInSchedule(
+                                            loan.emi_schedule,
+                                            currentEmiNumber,
+                                            paymentOrder.amount
+                                        );
+                                        emiScheduleArray = markResult.emiScheduleArray;
+                                        emiFullyPaid = markResult.emiFullyPaid === true;
+
+                                        if (markResult.updated) {
+                                            await executeQuery(
+                                                `UPDATE loan_applications
+                                                 SET emi_schedule = ?
+                                                 WHERE id = ?`,
+                                                [JSON.stringify(emiScheduleArray), paymentOrder.loan_id]
+                                            );
+                                            emiScheduleUpdated = true;
+                                            console.log(
+                                                emiFullyPaid
+                                                    ? `✅ Updated emi_schedule: EMI #${currentEmiNumber} marked as paid`
+                                                    : `✅ Updated emi_schedule: partial payment applied to EMI #${currentEmiNumber}`
+                                            );
                                         } else {
-                                            console.warn(`⚠️ emi_schedule not found in loan record`);
+                                            console.warn(`⚠️ emi_schedule update skipped for EMI #${currentEmiNumber} (missing or invalid schedule)`);
                                         }
                                     } catch (emiScheduleError) {
                                         console.error('❌ Error updating emi_schedule:', emiScheduleError);
-                                        // Don't fail the webhook - payment was successful, just log the error
                                     }
-                                    
-                                    // Check if this is the last EMI
-                                    if (currentEmiNumber === emiCount) {
-                                        shouldClearLoan = true;
-                                        console.log(`💰 Last EMI (${currentEmiNumber}/${emiCount}) paid - loan will be cleared`);
-                                    } else {
-                                        console.log(`ℹ️ EMI ${currentEmiNumber}/${emiCount} paid - loan will not be cleared yet`);
-                                        
-                                        // Trigger automatic event-based SMS (emi_cleared) - only if not the last EMI
+
+                                    const allEmisPaidOnSchedule = shouldClearLoanAfterPayment(paymentType, emiScheduleArray);
+                                    if (allEmisPaidOnSchedule) {
+                                        clearanceResult = await evaluateLoanClearanceEligibility({
+                                            executeQuery,
+                                            loan: { ...loan, emi_schedule: emiScheduleArray },
+                                            emiSchedule: emiScheduleArray
+                                        });
+                                        shouldClearLoan = clearanceResult.shouldClear === true;
+                                        if (shouldClearLoan) {
+                                            console.log(`💰 All EMIs paid and repayments verified for loan #${paymentOrder.loan_id} - loan will be cleared`);
+                                        } else {
+                                            console.warn(
+                                                `⚠️ EMI schedule shows all paid but loan #${paymentOrder.loan_id} not cleared: ${clearanceResult.reason}`,
+                                                { totalPaid: clearanceResult.totalPaid, amountDue: clearanceResult.amountDue }
+                                            );
+                                        }
+                                    }
+                                    if (shouldSendEmiClearedSms(emiScheduleUpdated, shouldClearLoan, emiFullyPaid)) {
+                                        console.log(`ℹ️ EMI ${currentEmiNumber} paid - loan will not be cleared until all EMIs are paid`);
                                         try {
                                             const { triggerEventSMS } = require('../utils/eventSmsTrigger');
                                             await triggerEventSMS('emi_cleared', {
@@ -1542,38 +1506,19 @@ router.post('/webhook', async (req, res) => {
                                             });
                                         } catch (smsError) {
                                             console.error('❌ Error sending emi_cleared SMS (non-fatal):', smsError);
-                                            // Don't fail - SMS failure shouldn't block payment processing
                                         }
+                                    } else if (emiScheduleUpdated && !emiFullyPaid) {
+                                        console.log(`ℹ️ Partial EMI ${currentEmiNumber} payment recorded — EMI not fully paid yet`);
+                                    } else if (currentEmiNumber > 0) {
+                                        console.warn(`⚠️ Skipping emi_cleared SMS — EMI #${currentEmiNumber} schedule was not updated`);
                                     }
                                 } else {
-                                    // Fallback: Use old logic (sum all payments)
-                                    const totalPaymentsResult = await executeQuery(
-                                        `SELECT COALESCE(SUM(amount), 0) as total_paid 
-                                         FROM loan_payments 
-                                         WHERE loan_id = ? AND status = 'SUCCESS'`,
-                                        [paymentOrder.loan_id]
-                                    );
-                                    
-                                    const totalPaid = parseFloat(totalPaymentsResult[0]?.total_paid || 0);
-                                    
-                                    const { calculateOutstandingBalance } = require('../utils/extensionCalculations');
-                                    const outstandingBalance = calculateOutstandingBalance(loan);
-                                    
-                                    console.log(`💰 Payment check for loan #${paymentOrder.loan_id}:`, {
-                                        totalPaid: totalPaid,
-                                        outstandingBalance: outstandingBalance,
-                                        remaining: outstandingBalance - totalPaid
-                                    });
-                                    
-                                    // If total payments >= outstanding balance (with small tolerance for rounding)
-                                    if (totalPaid >= outstandingBalance - 0.01) {
-                                        shouldClearLoan = true;
-                                    }
+                                    console.log(`ℹ️ ${paymentType} received for loan #${paymentOrder.loan_id} - partial repayments do not auto-clear loans`);
                                 }
                                 
                                 // Clear the loan if conditions are met
                                 if (shouldClearLoan) {
-                                    const closedAmount = parseFloat(loan.total_repayable) || 0;
+                                    const closedAmount = resolveClosedAmount(clearanceResult, loan);
                                     const todayStr = new Date().toISOString().split('T')[0];
                                     let updateParams = [closedAmount, paymentOrder.loan_id];
                                     let updateSet = `status = 'cleared', closed_date = CURDATE(), closed_amount = ?, updated_at = NOW()`;
@@ -1983,82 +1928,67 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                         // Process if loan is in an active repayment status (not already cleared)
                                         if (['account_manager', 'overdue', 'default', 'delinquent'].includes(loan.status)) {
                                             let shouldClearLoan = false;
-                                            
+                                            let clearanceResult = null;
+
                                             // Pre-close or full_payment: Immediately clear the loan
                                             if (paymentType === 'pre-close' || paymentType === 'full_payment') {
                                                 shouldClearLoan = true;
+                                                clearanceResult = { closedAmount: parseFloat(loan.total_repayable) || 0 };
                                                 console.log(`💰 ${paymentType === 'pre-close' ? 'Pre-close' : 'Full payment'} received - loan will be cleared immediately`);
                                             } else if (paymentType.startsWith('emi_')) {
-                                                // EMI payment: Only clear if this is the last EMI
-                                                let planSnapshot = {};
-                                                let emiCount = 1;
+                                                const currentEmiNumber = getEmiNumberFromPaymentType(paymentType);
+                                                let emiScheduleUpdated = false;
+                                                let emiFullyPaid = false;
+                                                let emiScheduleArray = null;
+
                                                 try {
-                                                    planSnapshot = typeof loan.plan_snapshot === 'string' 
-                                                        ? JSON.parse(loan.plan_snapshot) 
-                                                        : loan.plan_snapshot || {};
-                                                    emiCount = planSnapshot.emi_count || 1;
-                                                } catch (e) {
-                                                    console.error('Error parsing plan_snapshot:', e);
-                                                }
-                                                
-                                                // Determine which EMI this is
-                                                let currentEmiNumber = 0;
-                                                if (paymentType === 'emi_1st') currentEmiNumber = 1;
-                                                else if (paymentType === 'emi_2nd') currentEmiNumber = 2;
-                                                else if (paymentType === 'emi_3rd') currentEmiNumber = 3;
-                                                else if (paymentType === 'emi_4th') currentEmiNumber = 4;
-                                                
-                                                // Update emi_schedule to mark this EMI as paid
-                                                try {
-                                                    let emiSchedule = loan.emi_schedule;
-                                                    if (emiSchedule) {
-                                                        let emiScheduleArray = null;
-                                                        try {
-                                                            emiScheduleArray = typeof emiSchedule === 'string' 
-                                                                ? JSON.parse(emiSchedule) 
-                                                                : emiSchedule;
-                                                        } catch (parseError) {
-                                                            console.error('Error parsing emi_schedule:', parseError);
-                                                        }
-                                                        
-                                                        if (Array.isArray(emiScheduleArray) && emiScheduleArray.length >= currentEmiNumber) {
-                                                            // Update the status of the corresponding EMI (0-indexed array)
-                                                            const emiIndex = currentEmiNumber - 1;
-                                                            emiScheduleArray[emiIndex] = {
-                                                                ...emiScheduleArray[emiIndex],
-                                                                status: 'paid',
-                                                                paid_date: new Date().toISOString().split('T')[0],
-                                                                paid_amount: parseFloat(paymentOrder.amount) || null
-                                                            };
-                                                            
-                                                            // Update emi_schedule in database
-                                                            await executeQuery(
-                                                                `UPDATE loan_applications 
-                                                                 SET emi_schedule = ? 
-                                                                 WHERE id = ?`,
-                                                                [JSON.stringify(emiScheduleArray), paymentOrder.loan_id]
-                                                            );
-                                                            
-                                                            console.log(`✅ Updated emi_schedule: EMI #${currentEmiNumber} marked as paid`);
-                                                        } else {
-                                                            console.warn(`⚠️ emi_schedule array not found or invalid for EMI #${currentEmiNumber}`);
-                                                        }
+                                                    const markResult = markEmiPaidInSchedule(
+                                                        loan.emi_schedule,
+                                                        currentEmiNumber,
+                                                        paymentOrder.amount
+                                                    );
+                                                    emiScheduleArray = markResult.emiScheduleArray;
+                                                    emiFullyPaid = markResult.emiFullyPaid === true;
+
+                                                    if (markResult.updated) {
+                                                        await executeQuery(
+                                                            `UPDATE loan_applications
+                                                             SET emi_schedule = ?
+                                                             WHERE id = ?`,
+                                                            [JSON.stringify(emiScheduleArray), paymentOrder.loan_id]
+                                                        );
+                                                        emiScheduleUpdated = true;
+                                                        console.log(
+                                                            emiFullyPaid
+                                                                ? `✅ Updated emi_schedule: EMI #${currentEmiNumber} marked as paid`
+                                                                : `✅ Updated emi_schedule: partial payment applied to EMI #${currentEmiNumber}`
+                                                        );
                                                     } else {
-                                                        console.warn(`⚠️ emi_schedule not found in loan record`);
+                                                        console.warn(`⚠️ emi_schedule update skipped for EMI #${currentEmiNumber} (missing or invalid schedule)`);
                                                     }
                                                 } catch (emiScheduleError) {
                                                     console.error('❌ Error updating emi_schedule:', emiScheduleError);
-                                                    // Don't fail the webhook - payment was successful, just log the error
                                                 }
-                                                
-                                                // Check if this is the last EMI
-                                                if (currentEmiNumber === emiCount) {
-                                                    shouldClearLoan = true;
-                                                    console.log(`💰 Last EMI (${currentEmiNumber}/${emiCount}) paid - loan will be cleared`);
-                                                } else {
-                                                    console.log(`ℹ️ EMI ${currentEmiNumber}/${emiCount} paid - loan will not be cleared yet`);
-                                                    
-                                                    // Trigger automatic event-based SMS (emi_cleared) - only if not the last EMI
+
+                                                const allEmisPaidOnSchedule = shouldClearLoanAfterPayment(paymentType, emiScheduleArray);
+                                                if (allEmisPaidOnSchedule) {
+                                                    clearanceResult = await evaluateLoanClearanceEligibility({
+                                                        executeQuery,
+                                                        loan: { ...loan, emi_schedule: emiScheduleArray },
+                                                        emiSchedule: emiScheduleArray
+                                                    });
+                                                    shouldClearLoan = clearanceResult.shouldClear === true;
+                                                    if (shouldClearLoan) {
+                                                        console.log(`💰 All EMIs paid and repayments verified for loan #${paymentOrder.loan_id} - loan will be cleared`);
+                                                    } else {
+                                                        console.warn(
+                                                            `⚠️ EMI schedule shows all paid but loan #${paymentOrder.loan_id} not cleared: ${clearanceResult.reason}`,
+                                                            { totalPaid: clearanceResult.totalPaid, amountDue: clearanceResult.amountDue }
+                                                        );
+                                                    }
+                                                }
+                                                if (shouldSendEmiClearedSms(emiScheduleUpdated, shouldClearLoan, emiFullyPaid)) {
+                                                    console.log(`ℹ️ EMI ${currentEmiNumber} paid - loan will not be cleared until all EMIs are paid`);
                                                     try {
                                                         const { triggerEventSMS } = require('../utils/eventSmsTrigger');
                                                         await triggerEventSMS('emi_cleared', {
@@ -2070,38 +2000,19 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                                         });
                                                     } catch (smsError) {
                                                         console.error('❌ Error sending emi_cleared SMS (non-fatal):', smsError);
-                                                        // Don't fail - SMS failure shouldn't block payment processing
                                                     }
+                                                } else if (emiScheduleUpdated && !emiFullyPaid) {
+                                                    console.log(`ℹ️ Partial EMI ${currentEmiNumber} payment recorded — EMI not fully paid yet`);
+                                                } else if (currentEmiNumber > 0) {
+                                                    console.warn(`⚠️ Skipping emi_cleared SMS — EMI #${currentEmiNumber} schedule was not updated`);
                                                 }
                                             } else {
-                                                // Fallback: Use old logic (sum all payments)
-                                                const totalPaymentsResult = await executeQuery(
-                                                    `SELECT COALESCE(SUM(amount), 0) as total_paid 
-                                                     FROM loan_payments 
-                                                     WHERE loan_id = ? AND status = 'SUCCESS'`,
-                                                    [paymentOrder.loan_id]
-                                                );
-                                                
-                                                const totalPaid = parseFloat(totalPaymentsResult[0]?.total_paid || 0);
-                                                
-                                                const { calculateOutstandingBalance } = require('../utils/extensionCalculations');
-                                                const outstandingBalance = calculateOutstandingBalance(loan);
-                                                
-                                                console.log(`💰 Payment check for loan #${paymentOrder.loan_id}:`, {
-                                                    totalPaid: totalPaid,
-                                                    outstandingBalance: outstandingBalance,
-                                                    remaining: outstandingBalance - totalPaid
-                                                });
-                                                
-                                                // If total payments >= outstanding balance (with small tolerance for rounding)
-                                                if (totalPaid >= outstandingBalance - 0.01) {
-                                                    shouldClearLoan = true;
-                                                }
+                                                console.log(`ℹ️ ${paymentType} received for loan #${paymentOrder.loan_id} - partial repayments do not auto-clear loans`);
                                             }
                                             
                                             // Clear the loan if conditions are met
                                             if (shouldClearLoan) {
-                                                const closedAmount = parseFloat(loan.total_repayable) || 0;
+                                                const closedAmount = resolveClosedAmount(clearanceResult, loan);
                                                 const todayStr = new Date().toISOString().split('T')[0];
                                                 let updateParams = [closedAmount, paymentOrder.loan_id];
                                                 let updateSet = `status = 'cleared', closed_date = CURDATE(), closed_amount = ?, updated_at = NOW()`;

@@ -13,6 +13,7 @@ const {
   getInstitutionList,
   completeUploadAPI
 } = require('../services/digitapBankStatementService');
+const { fetchAndSaveBankStatementReports } = require('../utils/bankStatementReportStorage');
 const { getPresignedUrl, downloadFromS3 } = require('../services/s3Service');
 const { logActivity } = require('../middleware/activityLogger');
 
@@ -572,21 +573,16 @@ router.post('/:userId/check-status/:statementId', authenticateAdmin, async (req,
       console.log('✅ Report ready! Retrieving report...');
       console.log(`📥 Using txn_id: ${statusTxnId} to retrieve report`);
       // Function signature: retrieveBankStatementReport(client_ref_num, format, txn_id)
-      const reportResult = await retrieveBankStatementReport(null, 'json', statusTxnId);
+      const saveResult = await fetchAndSaveBankStatementReports({
+        executeQuery,
+        txnId: statusTxnId,
+        whereColumn: 'id',
+        whereValue: statement.id,
+        extraSet: { verification_status: 'api_verified' }
+      });
 
-      if (reportResult.success && reportResult.data) {
+      if (saveResult.success) {
         console.log('✅ Report retrieved successfully');
-        
-        // Store report in database
-        await executeQuery(
-          `UPDATE user_bank_statements 
-           SET report_data = ?,
-               verification_status = 'api_verified',
-               status = 'completed',
-               updated_at = NOW()
-           WHERE id = ?`,
-          [JSON.stringify(reportResult.data), statement.id]
-        );
 
         return res.json({
           status: 'success',
@@ -596,6 +592,7 @@ router.post('/:userId/check-status/:statementId', authenticateAdmin, async (req,
             statementStatus: 'completed',
             verificationStatus: 'api_verified',
             hasReport: true,
+            hasXml: !!saveResult.reportXml,
             txnStatus: statusResult.data.txn_status
           }
         });
@@ -801,30 +798,34 @@ router.get('/:userId/download-report/:statementId', authenticateAdmin, async (re
     }
 
     console.log(`📥 Downloading ${format} report using txn_id: ${txnIdToUse || 'N/A'}`);
-    
+
+    if (format === 'json') {
+      const saveResult = await fetchAndSaveBankStatementReports({
+        executeQuery,
+        clientRefNum: txnIdToUse ? null : statement.client_ref_num,
+        txnId: txnIdToUse || null,
+        whereColumn: 'id',
+        whereValue: statement.id
+      });
+
+      if (!saveResult.success) {
+        return res.status(500).json({
+          success: false,
+          message: saveResult.error || 'Failed to fetch report from Digitap'
+        });
+      }
+
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="bank-statement-${statement.client_ref_num || statementId}.json"`);
+      return res.json(saveResult.report);
+    }
+
     const reportResult = txnIdToUse
       ? await retrieveBankStatementReport(null, format, txnIdToUse)
       : await retrieveBankStatementReport(statement.client_ref_num, format);
 
     if (reportResult.success && reportResult.data) {
-      // Save report to database if JSON
-      if (format === 'json') {
-        const reportJsonString = typeof reportResult.data.report === 'string'
-          ? reportResult.data.report
-          : JSON.stringify(reportResult.data.report);
-
-        await executeQuery(
-          `UPDATE user_bank_statements 
-           SET report_data = ?,
-               updated_at = NOW()
-           WHERE id = ?`,
-          [reportJsonString, statement.id]
-        );
-
-        res.setHeader('Content-Type', 'application/json');
-        res.setHeader('Content-Disposition', `attachment; filename="bank-statement-${statement.client_ref_num || statementId}.json"`);
-        return res.json(reportResult.data.report);
-      } else if (format === 'xlsx') {
+      if (format === 'xlsx') {
         // For XLSX, return the buffer directly
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="bank-statement-${statement.client_ref_num || statementId}.xlsx"`);
@@ -897,6 +898,32 @@ router.post('/:userId/fetch-report', authenticateAdmin, async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'No transaction ID or client reference number found'
+      });
+    }
+
+    if (format === 'json') {
+      const saveResult = await fetchAndSaveBankStatementReports({
+        executeQuery,
+        clientRefNum: statement.txn_id ? null : statement.client_ref_num,
+        txnId: statement.txn_id || null,
+        whereColumn: 'id',
+        whereValue: statement.id
+      });
+
+      if (!saveResult.success) {
+        return res.status(500).json({
+          success: false,
+          message: saveResult.error || 'Failed to fetch report'
+        });
+      }
+
+      return res.json({
+        success: true,
+        data: {
+          report: saveResult.report,
+          hasXml: !!saveResult.reportXml,
+          cached: false
+        }
       });
     }
 
@@ -1556,22 +1583,17 @@ router.post('/:userId/start-upload/:statementId', authenticateAdmin, async (req,
             // Use txn_id from status response (most reliable)
             const statusTxnId = statusResult.data.txn_status?.[0]?.txn_id || txn_id;
             console.log(`📥 Using txn_id: ${statusTxnId} to retrieve report`);
-            // Function signature: retrieveBankStatementReport(client_ref_num, format, txn_id)
-            const reportResult = await retrieveBankStatementReport(null, 'json', statusTxnId);
 
-            if (reportResult.success && reportResult.data) {
+            const saveResult = await fetchAndSaveBankStatementReports({
+              executeQuery,
+              txnId: statusTxnId,
+              whereColumn: 'id',
+              whereValue: statement.id,
+              extraSet: { verification_status: 'api_verified' }
+            });
+
+            if (saveResult.success) {
               console.log('✅ Report retrieved successfully');
-              
-              // Store report in database
-              await executeQuery(
-                `UPDATE user_bank_statements 
-                 SET report_data = ?,
-                     verification_status = 'api_verified',
-                     status = 'completed',
-                     updated_at = NOW()
-                 WHERE id = ?`,
-                [JSON.stringify(reportResult.data), statement.id]
-              );
 
               return res.json({
                 status: 'success',
@@ -1582,7 +1604,8 @@ router.post('/:userId/start-upload/:statementId', authenticateAdmin, async (req,
                   txnId: txn_id,
                   statementId: statement.id,
                   status: 'completed',
-                  hasReport: true
+                  hasReport: true,
+                  hasXml: !!saveResult.reportXml
                 }
               });
             }

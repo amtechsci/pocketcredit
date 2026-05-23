@@ -376,6 +376,25 @@ const escapeCSV = (value, preserveLeadingZero = false) => {
     return str;
 };
 
+/** Disbursed loan count per user (account_manager, overdue, cleared) — matches Account Manager list. */
+async function getLoanCountByUserIds(userIds) {
+    const ids = [...new Set((userIds || []).filter((id) => id != null))];
+    if (ids.length === 0) return new Map();
+    const rows = await executeQuery(
+        `SELECT user_id, COUNT(*) AS total_loans
+         FROM loan_applications
+         WHERE user_id IN (${ids.map(() => '?').join(',')})
+           AND status IN ('account_manager', 'overdue', 'cleared')
+         GROUP BY user_id`,
+        ids
+    );
+    const map = new Map();
+    for (const row of rows || []) {
+        map.set(row.user_id, Number(row.total_loans) || 0);
+    }
+    return map;
+}
+
 /** Latest YYYY-MM-DD from EMI schedule (due_date). */
 const maxDueDateFromEmiSchedule = (emiScheduleRaw) => {
     if (!emiScheduleRaw) return null;
@@ -1464,6 +1483,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
         // Join with state_codes table to convert state code to state name
         let sql = `
             SELECT 
+                u.id as user_id,
                 CONCAT('PC', LPAD(u.id, 5, '0')) as rcid, 
                 CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) as pan_name,
                 ${CIBIL_STATE_NAME_SUBQUERY} as state_name,
@@ -1524,6 +1544,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
             console.warn('New payment structure not found, trying old transaction_details:', error.message);
             sql = `
                 SELECT 
+                    la.uid as user_id,
                     u.rcid, u.pan_name, u.state_code,
                     l.lid, l.processed_amount, l.p_fee, l.service_charge, l.penality_charge,
                     la.amount AS principal_amount, la.amount AS amount, la.processing_fees, la.pro_fee_per, la.interest_percentage,
@@ -1552,7 +1573,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
 
         const csvRows = [];
         const headers = [
-            'PCID', 'Name', 'Ledger Name', 'Reg.Type', 'Master type', 'Voucher No. (or PLLID)',
+            'PCID', 'Name', 'no. of loans', 'Ledger Name', 'Reg.Type', 'Master type', 'Voucher No. (or PLLID)',
             'Loan Process Date', 'Exhausted Days',
             'Sanctioned Amount', 'Disbursal Amount', 'Narration Journal', 'Reference No. (or Payout ID)',
             'Mode', 'Status', 'LoanDate', 'Country', 'State', 'Processing fee %', 'Processing Fees Collected',
@@ -1561,8 +1582,10 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
             'REPAYMENT AMOUNT'
         ];
         /** BS Repayment CSV: preserve leading zeros for Voucher No (PLL+id), Loan Process Date, LoanDate */
-        const BS_REPAYMENT_DATE_INDICES = [5, 6, 14];
+        const BS_REPAYMENT_DATE_INDICES = [6, 7, 15];
         csvRows.push(headers.map(escapeCSV).join(','));
+
+        const loanCountByUser = await getLoanCountByUserIds((rows || []).map((r) => r.user_id));
 
         const uniqueLids = [...new Set((rows || []).map((r) => r.lid))];
         const emiBreakdownByLoan = new Map();
@@ -1768,6 +1791,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
             const data = [
                 row.rcid || '',
                 row.pan_name || '',
+                loanCountByUser.get(row.user_id) ?? 1,
                 '', '', '',
                 voucher_no,
                 loanDate,
@@ -1825,6 +1849,7 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
         // Join with state_codes table to convert state code to state name
         let sql = `
             SELECT 
+                u.id as user_id,
                 CONCAT('PC', LPAD(u.id, 5, '0')) as rcid,
                 CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) as pan_name,
                 ${CIBIL_STATE_NAME_SUBQUERY} as state_name,
@@ -1859,6 +1884,7 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
             console.warn('New loan_applications structure not found, trying old loan/loan_apply tables:', error.message);
             sql = `
                 SELECT 
+                    la.uid as user_id,
                     u.rcid, u.pan_name, u.state_code, 
                     l.lid, la.amount, la.processing_fees, l.processed_amount, l.p_fee, 
                     l.exhausted_period, l.processed_date, la.pro_fee_per,
@@ -1882,14 +1908,16 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
 
         const csvRows = [];
         const headers = [
-            'PCID (Account ID)', 'Name', 'Ledger Name', 'Reg.Type', 'Master type', 'Voucher No. (or PLLID)',
+            'PCID (Account ID)', 'Name', 'no. of loans', 'Ledger Name', 'Reg.Type', 'Master type', 'Voucher No. (or PLLID)',
             'Sanctioned Amount', 'Disbursal Amount', 'Reference No. (or Payout ID)', 'Mode', 'Status', 'LoanDate',
             'Country', 'State', 'Processing fee %', 'Tenure', 'Processing Fees Collected', 'GST Amount on Processing Fees',
             'Check', 'Remarks'
         ];
         /** BS Disbursal CSV: preserve leading zeros for Voucher No (PLL+id), LoanDate */
-        const BS_DISBURSAL_PRESERVE_INDICES = [5, 11];
+        const BS_DISBURSAL_PRESERVE_INDICES = [6, 12];
         csvRows.push(headers.map(escapeCSV).join(','));
+
+        const loanCountByUser = await getLoanCountByUserIds((rows || []).map((r) => r.user_id));
 
         for (const row of rows) {
             // Voucher No: PLL + loan_application.id (unique)
@@ -1921,6 +1949,7 @@ router.get('/bs/disbursal', authenticateAdmin, async (req, res) => {
             const data = [
                 row.rcid || '',
                 row.pan_name || '',
+                loanCountByUser.get(row.user_id) ?? 1,
                 '', '', '',
                 voucher_no,
                 sanctioned_amount,
