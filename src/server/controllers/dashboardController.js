@@ -1,4 +1,5 @@
 const { executeQuery } = require('../config/database');
+const { releaseExpiredHoldIfNeeded } = require('../middleware/checkHoldStatus');
 
 // Simple in-memory cache for dashboard data
 const dashboardCache = new Map();
@@ -37,6 +38,9 @@ const getDashboardSummary = async (req, res) => {
         message: 'Not authenticated'
       });
     }
+
+    // Release expired holds before status checks so users can access dashboard
+    await releaseExpiredHoldIfNeeded(userId);
 
     // Check if user has completed their profile
     // Note: Don't filter by status='active' here - we need to allow 'on_hold' and 'deleted' users too
@@ -169,6 +173,8 @@ const getDashboardSummary = async (req, res) => {
 
 // Separate function to fetch dashboard data (for caching)
 const fetchDashboardData = async (userId) => {
+  await releaseExpiredHoldIfNeeded(userId);
+
   const userQuery = `
     SELECT 
       id, first_name, last_name, phone, email, personal_email, official_email, created_at, 

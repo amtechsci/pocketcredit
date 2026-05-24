@@ -1,6 +1,47 @@
 const { executeQuery } = require('../config/database');
 
 /**
+ * Release hold if hold_until_date has passed.
+ * Used by dashboard/profile routes that don't run checkHoldStatus middleware.
+ * @returns {Promise<{ released: boolean }>}
+ */
+const releaseExpiredHoldIfNeeded = async (userId) => {
+  const users = await executeQuery(
+    `SELECT status, hold_until_date FROM users WHERE id = ?`,
+    [userId]
+  );
+
+  if (!users || users.length === 0) {
+    return { released: false };
+  }
+
+  const user = users[0];
+
+  if (user.status !== 'on_hold' || !user.hold_until_date) {
+    return { released: false };
+  }
+
+  const holdUntil = new Date(user.hold_until_date);
+  const now = new Date();
+
+  if (now > holdUntil) {
+    await executeQuery(
+      `UPDATE users 
+      SET status = 'active', 
+          eligibility_status = 'pending',
+          application_hold_reason = NULL,
+          hold_until_date = NULL,
+          updated_at = NOW()
+      WHERE id = ?`,
+      [userId]
+    );
+    return { released: true };
+  }
+
+  return { released: false };
+};
+
+/**
  * Middleware to check if user is on hold
  * This middleware runs AFTER requireAuth, so req.userId and req.user are already set
  * 
@@ -50,20 +91,7 @@ const checkHoldStatus = async (req, res, next) => {
 
         // Check if hold period has expired
         if (now > holdUntil) {
-          // Hold expired - release the hold
-          await executeQuery(
-            `UPDATE users 
-            SET status = 'active', 
-                eligibility_status = 'pending',
-                application_hold_reason = NULL,
-                hold_until_date = NULL,
-                updated_at = NOW()
-            WHERE id = ?`,
-            [userId]
-          );
-
-          
-          // Proceed to next middleware
+          await releaseExpiredHoldIfNeeded(userId);
           return next();
         } else {
           // Still on hold - calculate remaining days
@@ -159,6 +187,7 @@ const addHoldInfo = async (req, res, next) => {
 
 module.exports = {
   checkHoldStatus,
-  addHoldInfo
+  addHoldInfo,
+  releaseExpiredHoldIfNeeded
 };
 

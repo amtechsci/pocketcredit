@@ -355,11 +355,13 @@ router.post('/initiate-bank-statement', requireAuth, checkHoldStatus, async (req
     const frontendUrl = process.env.FRONTEND_URL || (isDevelopment ? 'http://localhost:3000' : 'https://pocketcredit.in');
     const apiUrl = process.env.APP_URL || (isDevelopment ? 'http://localhost:3002' : 'https://pocketcredit.in/api');
 
-    // Return URL should point to backend first to log the callback, then redirect to frontend
-    // Routes are mounted at /api/bank-statement, so paths are relative to that
-    // apiUrl: production includes /api, development doesn't
-    const returnUrl = isDevelopment ? `${apiUrl}/api/bank-statement/bank-data/success` : `${apiUrl}/api/bank-statement/bank-data/success`;
-    const webhookUrl = isDevelopment ? `${apiUrl}/api/bank-statement/bank-data/webhook` : `${apiUrl}/api/bank-statement/bank-data/webhook`;
+    // Return/webhook URLs: prod APP_URL already includes /api (https://pocketcredit.in/api)
+    const returnUrl = isDevelopment
+      ? `${apiUrl}/api/bank-statement/bank-data/success`
+      : `${apiUrl}/bank-statement/bank-data/success`;
+    const webhookUrl = isDevelopment
+      ? `${apiUrl}/api/bank-statement/bank-data/webhook`
+      : `${apiUrl}/bank-statement/bank-data/webhook`;
 
     console.log('🔗 URLs configured:');
     console.log('   Return URL:', returnUrl);

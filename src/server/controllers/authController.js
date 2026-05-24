@@ -1,6 +1,7 @@
 const otpGenerator = require('otp-generator');
 const { getRedisClient, set, get, del } = require('../config/redis');
 const { findUserByMobileNumber, findUserById, createUser, updateLastLogin, getProfileSummary } = require('../models/user');
+const { releaseExpiredHoldIfNeeded } = require('../middleware/checkHoldStatus');
 const { initializeDatabase, executeQuery } = require('../config/database');
 const { smsService } = require('../utils/smsService');
 
@@ -416,7 +417,8 @@ const getProfile = async (req, res) => {
       });
     }
 
-    // Get user from database
+    // Get user from database (release expired hold first so profile reflects current status)
+    await releaseExpiredHoldIfNeeded(decoded.id);
     const user = await findUserById(decoded.id);
     
     if (!user) {

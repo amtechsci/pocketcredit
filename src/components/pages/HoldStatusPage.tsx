@@ -8,7 +8,7 @@ import { DashboardHeader } from '../DashboardHeader';
 
 export function HoldStatusPage() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
   const [holdInfo, setHoldInfo] = useState<{
     is_on_hold: boolean;
     hold_reason: string;
@@ -39,8 +39,15 @@ export function HoldStatusPage() {
         // Fetch dashboard data to get hold information
         const response = await apiService.getDashboardSummary();
 
-        if (response.status === 'success' && response.data?.hold_info) {
-          setHoldInfo(response.data.hold_info);
+        if (response.status === 'success' && response.data) {
+          const hold = response.data.hold_info;
+          // Hold expired or already released on server — refresh session and go to dashboard
+          if (!hold?.is_on_hold || hold?.is_expired) {
+            await refreshUser();
+            navigate('/dashboard', { replace: true });
+            return;
+          }
+          setHoldInfo(hold);
         } else {
           // Fallback: create hold info from user status
           setHoldInfo({
@@ -69,7 +76,7 @@ export function HoldStatusPage() {
     } else {
       setLoading(false);
     }
-  }, [user, navigate]);
+  }, [user, navigate, refreshUser]);
 
   const handleLogout = async () => {
     await logout();
@@ -88,7 +95,14 @@ export function HoldStatusPage() {
   }
 
   if (!holdInfo || !holdInfo.is_on_hold) {
-    return null; // Will redirect
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <DashboardHeader userName={userName} />
+        <div className="flex items-center justify-center min-h-[calc(100vh-4rem)]">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        </div>
+      </div>
+    );
   }
 
   const isPermanent = holdInfo.hold_type === 'permanent' || !holdInfo.hold_until;
@@ -165,7 +179,7 @@ export function HoldStatusPage() {
                 </div>
               </div>
             ) : (
-              // Expired Hold
+              // Expired Hold — redirect is handled in useEffect; show brief message while refreshing
               <div className="border border-green-300 bg-green-50/50 rounded-lg p-4">
                 <div className="flex items-start gap-3">
                   <div className="w-5 h-5 rounded-full bg-green-600 flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -176,7 +190,7 @@ export function HoldStatusPage() {
                       Hold Period Expired
                     </h3>
                     <p className="text-sm text-gray-700">
-                      Your hold period has expired. You can now continue with your application.
+                      Your hold period has expired. Redirecting you to the dashboard...
                     </p>
                   </div>
                 </div>
