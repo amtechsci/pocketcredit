@@ -8,6 +8,7 @@ const {
   retrieveBankStatementReport,
   generateClientRefNum,
   generateBankStatementURL,
+  getBankDataCallbackUrls,
   startUploadAPI,
   uploadStatementAPI,
   getInstitutionList,
@@ -1139,9 +1140,7 @@ router.post('/:userId/add-new', authenticateAdmin, async (req, res) => {
       finalInstitutionId = 1; // Default fallback
     }
 
-    // Determine callback URL
-    const defaultApiUrl = process.env.APP_URL || 'https://pocketcredit.in/api';
-    const txnCompletedCbUrl = `${defaultApiUrl}/bank-statement/bank-data/webhook`;
+    const { webhookUrl: txnCompletedCbUrl } = getBankDataCallbackUrls();
 
     // Call Digitap Start Upload API
     console.log(`📤 Calling Digitap Start Upload API for new statement (user ${userId})...`);
@@ -1421,9 +1420,7 @@ router.post('/:userId/start-upload/:statementId', authenticateAdmin, async (req,
       }
     }
 
-    // Determine callback URL
-    const defaultApiUrl = process.env.APP_URL || 'https://pocketcredit.in/api';
-    const txnCompletedCbUrl = `${defaultApiUrl}/bank-statement/bank-data/webhook`;
+    const { webhookUrl: txnCompletedCbUrl } = getBankDataCallbackUrls();
 
     // Call Digitap Start Upload API
     console.log(`📤 Calling Digitap Start Upload API for statement ${statementId} (user ${userId})...`);
@@ -1792,9 +1789,7 @@ router.post('/:userId/start-upload', authenticateAdmin, async (req, res) => {
       }
     }
 
-    // Determine callback URL
-    const defaultApiUrl = process.env.APP_URL || 'https://pocketcredit.in/api';
-    const txnCompletedCbUrl = `${defaultApiUrl}/bank-statement/bank-data/webhook`;
+    const { webhookUrl: txnCompletedCbUrl } = getBankDataCallbackUrls();
 
     // Call Digitap Start Upload API
     console.log(`📤 Calling Digitap Start Upload API for user ${userId}...`);

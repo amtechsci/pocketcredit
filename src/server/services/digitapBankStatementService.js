@@ -33,6 +33,24 @@ const ENDPOINTS = {
 };
 
 /**
+ * Resolve public API base URL (always ends with /api).
+ * APP_URL may be set with or without /api (e.g. https://pocketcredit.in or https://pocketcredit.in/api).
+ */
+function resolveApiBaseUrl() {
+  const isDevelopment = process.env.NODE_ENV === 'development' || (!process.env.NODE_ENV && !process.env.APP_URL);
+  const raw = (process.env.APP_URL || (isDevelopment ? 'http://localhost:3002' : 'https://pocketcredit.in')).replace(/\/+$/, '');
+  return raw.endsWith('/api') ? raw : `${raw}/api`;
+}
+
+function getBankDataCallbackUrls() {
+  const apiBase = resolveApiBaseUrl();
+  return {
+    returnUrl: `${apiBase}/bank-statement/bank-data/success`,
+    webhookUrl: `${apiBase}/bank-statement/bank-data/webhook`
+  };
+}
+
+/**
  * Generate Base64 encoded authorization header (with "Basic " prefix)
  * Used for Authorization header
  */
@@ -232,23 +250,14 @@ async function generateBankStatementURL(params) {
 
     const consent_request = [consentRequestObj];
 
-    // Determine API URL - prioritize environment variables, then use production URLs as default
-    // Only use localhost if explicitly in development mode
-    // API is on same domain as frontend: https://pocketcredit.in/api/
-    const isDevelopment = process.env.NODE_ENV === 'development' || (!process.env.NODE_ENV && !process.env.APP_URL);
-    const defaultApiUrl = process.env.APP_URL || (isDevelopment ? 'http://localhost:3002' : 'https://pocketcredit.in/api');
-    const defaultFrontendUrl = process.env.FRONTEND_URL || (isDevelopment ? 'http://localhost:3000' : 'https://pocketcredit.in');
-    
-    // Routes are mounted at /api/bank-statement, so add /api for dev, or just /bank-statement for prod (since defaultApiUrl already has /api)
-    const webhookPath = isDevelopment ? `${defaultApiUrl}/api/bank-statement/bank-data/webhook` : `${defaultApiUrl}/bank-statement/bank-data/webhook`;
-    const returnPath = isDevelopment ? `${defaultApiUrl}/api/bank-statement/bank-data/success` : `${defaultApiUrl}/bank-statement/bank-data/success`;
-    
+    const { returnUrl: defaultReturnUrl, webhookUrl: defaultWebhookUrl } = getBankDataCallbackUrls();
+
     const requestBody = {
       client_ref_num,
-      txn_completed_cburl: txn_completed_cburl || webhookPath,
+      txn_completed_cburl: txn_completed_cburl || defaultWebhookUrl,
       destination: destination,
       acceptance_policy: acceptance_policy,
-      return_url: return_url || returnPath,
+      return_url: return_url || defaultReturnUrl,
       mobile_num: mobile_num,
       multi_aa: multi_aa,
       consent_request: consent_request
@@ -897,9 +906,8 @@ async function uploadBankStatementPDF(params) {
       }
     }
 
-    // Determine callback URL
-    const defaultApiUrl = process.env.APP_URL || 'https://pocketcredit.in/api';
-    const finalCallbackUrl = txn_completed_cburl || `${defaultApiUrl}/bank-statement/bank-data/webhook`;
+    const { webhookUrl: defaultWebhookUrl } = getBankDataCallbackUrls();
+    const finalCallbackUrl = txn_completed_cburl || defaultWebhookUrl;
 
     const startUploadResult = await startUploadAPI({
       client_ref_num: client_ref_num,
@@ -1435,6 +1443,7 @@ module.exports = {
   retrieveBankStatementReport,
   initiateBankStatementCollection,
   generateClientRefNum,
+  getBankDataCallbackUrls,
   startUploadAPI,
   uploadStatementAPI,
   getInstitutionList,

@@ -11,7 +11,8 @@ const {
   uploadBankStatementPDF,
   checkBankStatementStatus,
   retrieveBankStatementReport,
-  generateClientRefNum
+  generateClientRefNum,
+  getBankDataCallbackUrls
 } = require('../services/digitapBankStatementService');
 const { saveUserInfoFromBankAPI } = require('../services/userInfoService');
 const { fetchAndSaveBankStatementReports } = require('../utils/bankStatementReportStorage');
@@ -353,15 +354,7 @@ router.post('/initiate-bank-statement', requireAuth, checkHoldStatus, async (req
     // Only use localhost if explicitly in development mode
     const isDevelopment = process.env.NODE_ENV === 'development' || (!process.env.NODE_ENV && !process.env.FRONTEND_URL);
     const frontendUrl = process.env.FRONTEND_URL || (isDevelopment ? 'http://localhost:3000' : 'https://pocketcredit.in');
-    const apiUrl = process.env.APP_URL || (isDevelopment ? 'http://localhost:3002' : 'https://pocketcredit.in/api');
-
-    // Return/webhook URLs: prod APP_URL already includes /api (https://pocketcredit.in/api)
-    const returnUrl = isDevelopment
-      ? `${apiUrl}/api/bank-statement/bank-data/success`
-      : `${apiUrl}/bank-statement/bank-data/success`;
-    const webhookUrl = isDevelopment
-      ? `${apiUrl}/api/bank-statement/bank-data/webhook`
-      : `${apiUrl}/bank-statement/bank-data/webhook`;
+    const { returnUrl, webhookUrl } = getBankDataCallbackUrls();
 
     console.log('🔗 URLs configured:');
     console.log('   Return URL:', returnUrl);
