@@ -866,9 +866,8 @@ router.post('/change-mobile-number', requireAuth, async (req, res) => {
       });
     }
 
-    // Verify OTP
-    const TEST_OTP = '8800';
-    const isTestOtp = otp === TEST_OTP;
+    // Test OTP bypass — only active outside production
+    const isTestOtp = process.env.NODE_ENV !== 'production' && otp === '8800';
 
     if (!isTestOtp) {
       const otpKey = `otp:${new_mobile}`;

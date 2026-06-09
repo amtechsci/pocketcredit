@@ -78,9 +78,10 @@ function formatDateLocal(date) {
 async function getKFSData(loanId, baseUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 3001}`) {
   try {
     console.log(`📊 Fetching KFS data for loan #${loanId}...`);
+    const { INTERNAL_API_SECRET } = require('../config/internalSecret');
     const kfsDataResponse = await axios.get(`${baseUrl}/api/kfs/${loanId}`, {
       headers: {
-        'x-internal-call': 'true'
+        'x-internal-secret': INTERNAL_API_SECRET,
       },
       timeout: 30000
     });

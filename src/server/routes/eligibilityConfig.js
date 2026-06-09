@@ -1,6 +1,9 @@
 const express = require('express');
 const { executeQuery, initializeDatabase } = require('../config/database');
+const { authenticateAdmin } = require('../middleware/auth');
 const router = express.Router();
+
+router.use(authenticateAdmin);
 
 // GET /api/admin/settings/eligibility-config - Get all eligibility configurations
 router.get('/eligibility-config', async (req, res) => {

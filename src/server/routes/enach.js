@@ -773,9 +773,6 @@ router.get('/health', async (req, res) => {
         const health = {
             service: 'eNACH',
             status: 'ok',
-            environment: NODE_ENV,
-            production: IS_PRODUCTION,
-            api_base: CASHFREE_API_BASE,
             configured: !!(CASHFREE_CLIENT_ID && CASHFREE_CLIENT_SECRET),
             timestamp: new Date().toISOString()
         };

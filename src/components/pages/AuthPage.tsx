@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useGoogleReCaptcha } from 'react-google-recaptcha-v3';
 import { Phone, Key } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -55,6 +56,7 @@ function PolicyLink({ slug, label }: { slug: string; label: string }) {
 export function AuthPage() {
   const navigate = useNavigate();
   const { loginWithOTP } = useAuth();
+  const { executeRecaptcha } = useGoogleReCaptcha();
   const [mobileNumber, setMobileNumber] = useState('');
   const [otp, setOtp] = useState('');
   const [showOtp, setShowOtp] = useState(false);
@@ -84,6 +86,8 @@ export function AuthPage() {
     setLoading(true);
     
     try {
+      const recaptchaToken = executeRecaptcha ? await executeRecaptcha('send_otp') : '';
+
       // Call the API service directly to avoid context loading state conflicts
       const response = await fetch('/api/auth/send-otp', {
         method: 'POST',
@@ -91,7 +95,7 @@ export function AuthPage() {
           'Content-Type': 'application/json',
         },
         credentials: 'include', // Important for session management
-        body: JSON.stringify({ mobile: mobileNumber }),
+        body: JSON.stringify({ mobile: mobileNumber, recaptcha_token: recaptchaToken }),
       });
 
       const result = await response.json();

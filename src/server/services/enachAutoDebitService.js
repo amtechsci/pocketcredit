@@ -60,11 +60,20 @@ function getFirstOverdueEmi(schedule, todayStr) {
 
     // DPD >= 1 ↔ due_date is strictly before today
     if (dueDate < todayStr) {
+      // Full EMI due (use instalment_amount first; emi_amount may include dynamically-added penalty)
+      const fullDue = Number(emi.instalment_amount || emi.emi_amount || emi.amount || 0);
+      // Subtract any amount already partially paid so we charge only what is still outstanding.
+      // paid_amount is set in the stored emi_schedule by applyPaymentToEmi when a partial payment
+      // is recorded. Charging the full amount would over-collect from the user.
+      const alreadyPaid = Number(emi.paid_amount || 0);
+      const remaining = Math.max(0, Math.round((fullDue - alreadyPaid) * 100) / 100);
+      const baseAmount = remaining > 0 ? remaining : fullDue;
+
       return {
         emiNumber: Number(emi.emi_number || emi.instalment_no || i + 1),
         dueDate,
-        baseAmount: Number(emi.instalment_amount || emi.emi_amount || emi.amount || 0),
-        // principal is used for penalty calc; fall back to baseAmount if absent
+        baseAmount,
+        // principal is used for penalty calc; fall back to fullDue if absent
         emiPrincipal: Number(emi.principal || emi.instalment_amount || emi.emi_amount || emi.amount || 0)
       };
     }

@@ -1617,9 +1617,13 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
  * GET /api/kfs/:loanId
  * Generate KFS (Key Facts Statement) data for a loan (Admin only)
  */
-// Internal helper to check if request is from internal call
+const { INTERNAL_API_SECRET } = require('../config/internalSecret');
+
+// Internal helper — verifies caller is a trusted in-process service (PDF generation etc.)
+// Checks a per-process secret so external callers cannot forge an "internal" request.
 const isInternalCall = (req) => {
-  return req.headers['x-internal-call'] === 'true' || req.query.internal === 'true';
+  const provided = req.headers['x-internal-secret'];
+  return !!(provided && provided === INTERNAL_API_SECRET);
 };
 
 /**

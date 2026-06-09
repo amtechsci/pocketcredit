@@ -1078,12 +1078,16 @@ router.post('/webhook', async (req, res) => {
             console.error('❌ [Payment Webhook] Error logging to webhook_logs:', logErr);
         }
 
-        // Verify signature (optional but recommended)
-        // const isValid = cashfreePayment.verifyWebhookSignature(signature, payload);
-        // if (!isValid) {
-        //   console.error('❌ Invalid webhook signature');
-        //   return res.status(401).json({ message: 'Invalid signature' });
-        // }
+        // Verify Cashfree webhook signature when secret is configured
+        if (signature && cashfreePayment.clientSecret) {
+          const isValid = cashfreePayment.verifyWebhookSignature(signature, payload);
+          if (!isValid) {
+            console.error('❌ Invalid payment webhook signature — request rejected');
+            return res.status(401).json({ message: 'Invalid signature' });
+          }
+        } else if (!signature) {
+          console.warn('⚠️  Payment webhook received without signature header');
+        }
 
         const { order, payment } = payload.data || {};
         if (!order) {

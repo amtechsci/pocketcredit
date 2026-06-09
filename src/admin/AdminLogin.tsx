@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Shield, Eye, EyeOff, Phone, Mail } from 'lucide-react';
+import { useGoogleReCaptcha } from 'react-google-recaptcha-v3';
 import { adminApiService } from '../services/adminApi';
 import type { AdminUser } from '../AdminApp';
 
@@ -8,6 +9,7 @@ interface AdminLoginProps {
 }
 
 export function AdminLogin({ onLogin }: AdminLoginProps) {
+  const { executeRecaptcha } = useGoogleReCaptcha();
   const [loginMethod, setLoginMethod] = useState<'email' | 'mobile'>('email');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -71,7 +73,8 @@ export function AdminLogin({ onLogin }: AdminLoginProps) {
     setError('');
 
     try {
-      const response = await adminApiService.sendOTP(mobile);
+      const recaptchaToken = executeRecaptcha ? await executeRecaptcha('admin_send_otp') : '';
+      const response = await adminApiService.sendOTP(mobile, recaptchaToken);
       
       if (response.status === 'success') {
         setShowOtp(true);

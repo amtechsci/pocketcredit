@@ -1093,17 +1093,47 @@ async function computeLoanCalculationResponseData(loanId, opts = {}) {
             const updateFields = [];
             const updateValues = [];
             
-            // For multi-EMI loans, update emi_schedule
-            // Note: Penalty is calculated dynamically based on how overdue the EMI is, so it's not stored
-            // The schedule returned to frontend will include penalty, but stored format keeps it minimal
+            // For multi-EMI loans, update emi_schedule.
+            // IMPORTANT: preserve payment-tracking fields (paid_amount, paid_date, instalment_amount)
+            // from the stored schedule so that partial payments are not silently wiped.
+            // emi_amount is stored as the CURRENT penalty-inclusive display amount (may grow with DPD),
+            // but instalment_amount (the original base EMI) must remain stable so eNACH always charges
+            // the correct remaining amount.
             if (schedule && schedule.length > 0) {
-              const updatedEmiSchedule = schedule.map((instalment) => ({
-                emi_number: instalment.emi_number,
-                instalment_no: instalment.instalment_no,
-                due_date: instalment.due_date,
-                emi_amount: instalment.instalment_amount, // EMI amount includes penalty if overdue
-                status: instalment.status || 'pending'
-              }));
+              const updatedEmiSchedule = schedule.map((instalment, idx) => {
+                const instalmentNo = instalment.instalment_no || instalment.emi_number || idx + 1;
+                const storedEmi = (Array.isArray(emiScheduleArray)
+                  ? (emiScheduleArray.find(e =>
+                      e.instalment_no === instalmentNo || e.emi_number === instalmentNo
+                    ) || emiScheduleArray[idx])
+                  : null) || {};
+
+                const entry = {
+                  // Spread existing stored fields first so nothing is lost
+                  ...storedEmi,
+                  // Always overwrite structural fields with freshly-calculated values
+                  emi_number: instalment.emi_number,
+                  instalment_no: instalment.instalment_no,
+                  due_date: instalment.due_date,
+                  status: instalment.status || storedEmi.status || 'pending',
+                  // Dynamic penalty-inclusive amount used for display / repayment page
+                  emi_amount: instalment.instalment_amount,
+                };
+
+                // Preserve the original base instalment_amount from the stored schedule so that
+                // eNACH auto-debit always charges the correct remaining amount rather than the
+                // ever-growing penalty-inclusive emi_amount.
+                if (storedEmi.instalment_amount != null) {
+                  entry.instalment_amount = storedEmi.instalment_amount;
+                }
+
+                // Preserve paid_date from instalment if it was merged in
+                if (instalment.paid_date) {
+                  entry.paid_date = instalment.paid_date;
+                }
+
+                return entry;
+              });
               updateFields.push('emi_schedule = ?');
               updateValues.push(JSON.stringify(updatedEmiSchedule));
             }

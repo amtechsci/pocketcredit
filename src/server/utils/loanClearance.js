@@ -284,6 +284,10 @@ async function getSystemAdminId(executeQuery) {
 
 /**
  * Ledger row in transactions for automated eNACH debits (admin Transaction History).
+ *
+ * @param {boolean|null} [overrideEmiFullyPaid] - When provided, skips re-deriving emiFullyPaid
+ *   from the schedule (avoids misclassification when emi_amount was bumped by a concurrent
+ *   getLoanCalculation call between charge submission and success processing).
  */
 async function recordEnachLedgerTransaction({
   executeQuery,
@@ -291,7 +295,8 @@ async function recordEnachLedgerTransaction({
   paymentId,
   amount,
   emiNumber,
-  bankReference
+  bankReference,
+  overrideEmiFullyPaid = null
 }) {
   const reference = String(paymentId || '').trim();
   if (!reference) {
@@ -314,9 +319,18 @@ async function recordEnachLedgerTransaction({
     return { created: false, reason: 'no_system_admin' };
   }
 
-  const schedule = parseEmiSchedule(loan.emi_schedule) || [];
-  const emi = schedule[emiNumber - 1];
-  const emiFullyPaid = emi ? isEmiFullyPaid(emi) : false;
+  // Prefer the caller-supplied flag; fall back to reading the in-memory schedule.
+  // The caller (applySuccessfulChargeToLoan) already ran applyPaymentToEmi and knows the
+  // definitive result — using that value avoids misclassification when emi_amount in the
+  // stored schedule was raised by a concurrent getLoanCalculation call.
+  let emiFullyPaid;
+  if (overrideEmiFullyPaid !== null) {
+    emiFullyPaid = overrideEmiFullyPaid;
+  } else {
+    const schedule = parseEmiSchedule(loan.emi_schedule) || [];
+    const emi = schedule[emiNumber - 1];
+    emiFullyPaid = emi ? isEmiFullyPaid(emi) : false;
+  }
   const txType = emiFullyPaid ? 'emi_payment' : 'part_payment';
   const today = new Date().toISOString().split('T')[0];
   const utr = bankReference && String(bankReference) !== reference

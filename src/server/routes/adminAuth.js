@@ -4,9 +4,11 @@ const otpGenerator = require('otp-generator');
 const { generateToken, verifyToken } = require('../middleware/auth');
 const { validate, schemas } = require('../middleware/validation');
 const { executeQuery, initializeDatabase } = require('../config/database');
-const { set, get, del } = require('../config/redis');
+const { set, get, del, getRedisClient } = require('../config/redis');
 const { v4: uuidv4 } = require('uuid');
 const { smsService } = require('../utils/smsService');
+const { otpIpGuard } = require('../middleware/otpIpGuard');
+const { recaptchaVerify } = require('../middleware/recaptchaVerify');
 const router = express.Router();
 
 // Initialize database connection
@@ -155,7 +157,7 @@ router.post('/logout', async (req, res) => {
 });
 
 // Admin Send OTP (Mobile)
-router.post('/send-otp', async (req, res) => {
+router.post('/send-otp', otpIpGuard, recaptchaVerify, async (req, res) => {
   try {
     const { mobile } = req.body;
 
@@ -167,11 +169,33 @@ router.post('/send-otp', async (req, res) => {
       });
     }
 
+    // Per-mobile throttle: 60-second cooldown + max 5 OTPs per 24 hours
+    const redisClient = getRedisClient();
+    if (redisClient) {
+      const cooldownKey = `admin_otp_cooldown:${mobile}`;
+      const cooldownTtl = await redisClient.ttl(cooldownKey);
+      if (cooldownTtl > 0) {
+        return res.status(429).json({
+          status: 'error',
+          message: `Please wait ${cooldownTtl} second${cooldownTtl !== 1 ? 's' : ''} before requesting another OTP.`,
+          retryAfter: cooldownTtl
+        });
+      }
+
+      const dailyKey = `admin_otp_daily:${mobile}`;
+      const dailyCount = await redisClient.get(dailyKey);
+      if (dailyCount && parseInt(dailyCount, 10) >= 5) {
+        return res.status(429).json({
+          status: 'error',
+          message: 'Maximum OTP requests reached for today. Please try again tomorrow.'
+        });
+      }
+    }
+
     await ensureDbInitialized();
 
-    // Check if admin exists with this mobile number
-    // First, check if phone column exists in admins table
-    let adminExists = false;
+    // Verify admin exists and is active BEFORE generating or sending OTP
+    // This stops SMS spam to arbitrary mobile numbers
     try {
       const columnCheck = await executeQuery(`
         SELECT COUNT(*) as count 
@@ -183,17 +207,21 @@ router.post('/send-otp', async (req, res) => {
 
       if (columnCheck[0].count > 0) {
         const admins = await executeQuery(
-          'SELECT id, name, email, role, is_active FROM admins WHERE phone = ?',
+          'SELECT id, is_active FROM admins WHERE phone = ?',
           [mobile]
         );
-        adminExists = admins.length > 0 && admins[0].is_active;
+        if (admins.length === 0 || !admins[0].is_active) {
+          // Return generic message to avoid user enumeration
+          return res.status(200).json({
+            status: 'success',
+            message: 'OTP sent successfully',
+            data: { mobile, expiresIn: 300 }
+          });
+        }
       }
     } catch (err) {
-      console.log('Phone column check failed, using email fallback:', err.message);
+      console.warn('Admin phone check failed:', err.message);
     }
-
-    // If phone column doesn't exist or no admin found, you might want to return error
-    // For now, we'll allow OTP generation and check during verification
 
     // Generate 4-digit OTP
     const otp = otpGenerator.generate(4, {
@@ -247,6 +275,16 @@ router.post('/send-otp', async (req, res) => {
       console.log('📱 Admin OTP (Development):', otp);
     }
 
+    // Update throttle counters after OTP is stored
+    if (redisClient) {
+      await redisClient.setex(`admin_otp_cooldown:${mobile}`, 60, '1');
+      const dailyKey = `admin_otp_daily:${mobile}`;
+      const newCount = await redisClient.incr(dailyKey);
+      if (newCount === 1) {
+        await redisClient.expire(dailyKey, 86400);
+      }
+    }
+
     res.json({
       status: 'success',
       message: 'OTP sent successfully',
@@ -294,9 +332,8 @@ router.post('/verify-otp', async (req, res) => {
 
     await ensureDbInitialized();
 
-    // Testing OTP - allow "8800" to bypass verification (for development/testing)
-    const TEST_OTP = '8800';
-    const isTestOtp = otp === TEST_OTP;
+    // Test OTP bypass — only active outside production
+    const isTestOtp = process.env.NODE_ENV !== 'production' && otp === '8800';
 
     // Retrieve OTP from Redis (only if not using test OTP)
     const otpKey = `admin_otp:${mobile}`;

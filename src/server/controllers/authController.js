@@ -116,6 +116,29 @@ const sendOtp = async (req, res) => {
       });
     }
 
+    // Per-mobile throttle: 60-second cooldown + max 5 OTPs per 24 hours
+    const redisClient = getRedisClient();
+    if (redisClient) {
+      const cooldownKey = `otp_cooldown:${mobile}`;
+      const cooldownTtl = await redisClient.ttl(cooldownKey);
+      if (cooldownTtl > 0) {
+        return res.status(429).json({
+          status: 'error',
+          message: `Please wait ${cooldownTtl} second${cooldownTtl !== 1 ? 's' : ''} before requesting another OTP.`,
+          retryAfter: cooldownTtl
+        });
+      }
+
+      const dailyKey = `otp_daily:${mobile}`;
+      const dailyCount = await redisClient.get(dailyKey);
+      if (dailyCount && parseInt(dailyCount, 10) >= 5) {
+        return res.status(429).json({
+          status: 'error',
+          message: 'Maximum OTP requests reached for today. Please try again tomorrow.'
+        });
+      }
+    }
+
     // Generate 4-digit OTP
     const otp = otpGenerator.generate(4, {
       upperCaseAlphabets: false,
@@ -169,6 +192,16 @@ const sendOtp = async (req, res) => {
       console.log(`📱 OTP (Development fallback): ${otp}`);
     }
 
+    // Update throttle counters after OTP is stored
+    if (redisClient) {
+      await redisClient.setex(`otp_cooldown:${mobile}`, 60, '1');
+      const dailyKey = `otp_daily:${mobile}`;
+      const newCount = await redisClient.incr(dailyKey);
+      if (newCount === 1) {
+        await redisClient.expire(dailyKey, 86400);
+      }
+    }
+
     res.json({
       status: 'success',
       message: 'OTP sent successfully',
@@ -218,9 +251,8 @@ const verifyOtp = async (req, res) => {
       });
     }
 
-    // Testing OTP - allow "8800" to bypass verification (for development/testing)
-    const TEST_OTP = '8800';
-    const isTestOtp = otp === TEST_OTP;
+    // Test OTP bypass — only active outside production
+    const isTestOtp = process.env.NODE_ENV !== 'production' && otp === '8800';
 
     // Retrieve OTP from Redis (only if not using test OTP)
     const otpKey = `otp:${mobile}`;

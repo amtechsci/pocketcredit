@@ -1,3 +1,4 @@
+const axios = require('axios');
 const { retrieveBankStatementReport } = require('../services/digitapBankStatementService');
 
 const ALLOWED_TABLES = new Set(['user_bank_statements', 'digitap_bank_statements']);
@@ -43,6 +44,87 @@ async function ensureReportXmlColumns(executeQuery, table = null) {
 
 function serializeJsonReport(report) {
   return typeof report === 'string' ? report : JSON.stringify(report);
+}
+
+function parseReportObject(report) {
+  if (!report) return null;
+  if (typeof report === 'string') {
+    try {
+      return JSON.parse(report);
+    } catch {
+      return null;
+    }
+  }
+  return report;
+}
+
+function mergeTransactionsFromSourceReport(report) {
+  const source = report.source_report;
+  if (!source || typeof source !== 'object' || !Array.isArray(report.banks)) {
+    return;
+  }
+
+  const sourceBanks = Array.isArray(source.banks) ? source.banks : null;
+  if (!sourceBanks) {
+    return;
+  }
+
+  for (let i = 0; i < report.banks.length; i++) {
+    const bank = report.banks[i];
+    const sourceBank = sourceBanks[i] || sourceBanks[0];
+    if (!bank?.accounts || !sourceBank?.accounts) continue;
+
+    for (let j = 0; j < bank.accounts.length; j++) {
+      const account = bank.accounts[j];
+      const sourceAccount = sourceBank.accounts[j] || sourceBank.accounts[0];
+      if (!account || !Array.isArray(sourceAccount?.transactions) || sourceAccount.transactions.length === 0) {
+        continue;
+      }
+      if (!Array.isArray(account.transactions) || account.transactions.length === 0) {
+        account.transactions = sourceAccount.transactions;
+      }
+    }
+  }
+}
+
+/**
+ * Digitap JSON often includes source_report as a pre-signed S3 URL (expires ~12h).
+ * Fetch and inline it while the URL is still valid so report_data remains usable later.
+ */
+async function fetchAndInlineSourceReport(report) {
+  const parsed = parseReportObject(report);
+  if (!parsed) {
+    return report;
+  }
+
+  const sourceReport = parsed.source_report;
+  if (!sourceReport || typeof sourceReport !== 'string' || !/^https?:\/\//i.test(sourceReport.trim())) {
+    return parsed;
+  }
+
+  const originalUrl = sourceReport.trim();
+
+  try {
+    const response = await axios.get(originalUrl, {
+      timeout: 60000,
+      responseType: 'json',
+      maxContentLength: 50 * 1024 * 1024,
+      validateStatus: (status) => status === 200
+    });
+
+    parsed.source_report_url = originalUrl;
+    parsed.source_report_fetched_at = new Date().toISOString();
+    parsed.source_report = response.data;
+    mergeTransactionsFromSourceReport(parsed);
+
+    const size = JSON.stringify(response.data).length;
+    console.log(`✅ Inlined source_report from S3 (${size} chars)`);
+  } catch (err) {
+    console.warn('⚠️  Failed to fetch source_report URL (non-fatal):', err.message);
+    parsed.source_report_fetch_error = err.message;
+  }
+
+  return parsed;
 }
 
 async function fetchDigitapJsonReport(clientRefNum, txnId) {
@@ -122,7 +204,8 @@ async function fetchAndSaveBankStatementReports(options) {
     return { success: false, error: jsonResult.error || 'Failed to retrieve JSON report' };
   }
 
-  const reportJsonString = serializeJsonReport(jsonResult.data.report);
+  const reportWithSource = await fetchAndInlineSourceReport(jsonResult.data.report);
+  const reportJsonString = serializeJsonReport(reportWithSource);
   const reportXml = fetchXml ? await fetchDigitapXmlReport(clientRefNum, txnId) : null;
 
   const setParts = ['report_data = ?', 'report_xml = ?', "status = 'completed'", 'updated_at = NOW()'];
@@ -145,7 +228,7 @@ async function fetchAndSaveBankStatementReports(options) {
 
   return {
     success: true,
-    report: jsonResult.data.report,
+    report: reportWithSource,
     reportXml,
     reportJsonString
   };
@@ -154,6 +237,7 @@ async function fetchAndSaveBankStatementReports(options) {
 module.exports = {
   ensureReportXmlColumns,
   fetchAndSaveBankStatementReports,
+  fetchAndInlineSourceReport,
   fetchDigitapXmlReport,
   serializeJsonReport
 };

@@ -17,15 +17,15 @@ const { executeQuery, initializeDatabase } = require('../config/database');
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const CASHFREE_WEBHOOK_SECRET = process.env.CASHFREE_WEBHOOK_SECRET;
 
-// Webhook signature verification (if Cashfree provides it)
+// Webhook signature verification
 function verifyWebhookSignature(payload, signature, secret) {
     if (!secret || !signature) {
         if (NODE_ENV === 'production') {
-            console.warn('[PayoutWebhook] WARNING: Signature verification skipped in production - webhook secret not configured');
-        } else {
-            console.warn('[PayoutWebhook] Signature verification skipped - no secret configured');
+            console.error('[PayoutWebhook] SECURITY: Rejecting webhook — CASHFREE_WEBHOOK_SECRET is not set or signature header missing');
+            return false; // Fail-closed in production
         }
-        return true; // Skip if not configured (but warn in production)
+        console.warn('[PayoutWebhook] Signature verification skipped in non-production');
+        return true;
     }
 
     try {
@@ -102,12 +102,12 @@ router.post('/webhook', express.json(), async (req, res) => {
         });
     }
 
-    // Verify webhook signature if secret is configured
-    if (CASHFREE_WEBHOOK_SECRET && signature && req.body.type !== 'test') {
+    // Verify webhook signature — required in production
+    if (req.body.type !== 'test' && req.body.type !== 'ping') {
         const isValid = verifyWebhookSignature(req.body, signature, CASHFREE_WEBHOOK_SECRET);
         if (!isValid) {
-            console.error(`[PayoutWebhook ${requestId}] Invalid signature - rejecting webhook`);
-            return res.status(200).json({
+            console.error(`[PayoutWebhook ${requestId}] Rejected: invalid or missing signature`);
+            return res.status(401).json({
                 status: 'error',
                 message: 'Invalid webhook signature',
                 requestId

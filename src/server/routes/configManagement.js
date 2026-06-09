@@ -1,6 +1,9 @@
 const express = require('express');
 const { executeQuery, initializeDatabase } = require('../config/database');
+const { authenticateAdmin } = require('../middleware/auth');
 const router = express.Router();
+
+router.use(authenticateAdmin);
 
 // =====================================================
 // CONFIGURATION MANAGEMENT API

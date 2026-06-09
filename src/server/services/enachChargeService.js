@@ -247,7 +247,10 @@ async function applySuccessfulChargeToLoan({ loanApplicationId, paymentId, amoun
       paymentId,
       amount: chargeAmount,
       emiNumber,
-      bankReference
+      bankReference,
+      // Pass the definitive paid-status from applyPaymentToEmi so the ledger type is never
+      // misclassified when emi_amount was bumped by a concurrent getLoanCalculation call.
+      overrideEmiFullyPaid: emiFullyPaid
     });
     if (ledger.created) {
       console.log(`[eNACH] Ledger transaction created for loan #${loanApplicationId} (${ledger.transactionType})`);
