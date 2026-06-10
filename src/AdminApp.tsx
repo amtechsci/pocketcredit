@@ -31,6 +31,7 @@ import { TvrIdsPage } from './admin/pages/TvrIdsPage';
 import { FollowUpUserPage } from './admin/pages/FollowUpUserPage';
 import { PerformancePage } from './admin/pages/PerformancePage';
 import { SalesTrackerUserPage } from './admin/pages/SalesTrackerUserPage';
+import { OtpSecurityPage } from './admin/pages/OtpSecurityPage';
 import { AdminProvider, useAdmin } from './admin/context/AdminContext';
 import { Logo } from './components/Logo';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from './components/ui/sheet';
@@ -191,7 +192,8 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
       navByRole.push(
         { path: `${BASE_PATH}/tvr-ids`, label: 'TVR IDs', color: 'purple' },
         { path: `${BASE_PATH}/partners`, label: 'Partners', color: 'blue' },
-        { path: `${BASE_PATH}/team-management`, label: 'Team Management', color: 'blue' }
+        { path: `${BASE_PATH}/team-management`, label: 'Team Management', color: 'blue' },
+        { path: `${BASE_PATH}/otp-security`, label: 'OTP Security', color: 'red' }
       );
     }
   }
@@ -570,6 +572,11 @@ export default function AdminApp() {
         <Route path="sms-templates" element={
           <ProtectedRoute>
             <SmsTemplatesPage />
+          </ProtectedRoute>
+        } />
+        <Route path="otp-security" element={
+          <ProtectedRoute>
+            <OtpSecurityPage />
           </ProtectedRoute>
         } />
         <Route path="kfs/:loanId" element={

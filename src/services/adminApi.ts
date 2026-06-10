@@ -263,6 +263,31 @@ class AdminApiService {
     return this.request('POST', '/auth/send-otp', { mobile, recaptcha_token: recaptchaToken || '' });
   }
 
+  // OTP Security — IP block / whitelist management
+  async getBlockedIps(): Promise<ApiResponse<{ ip: string; blocked_at: string; request_count: number; reason: string }[]>> {
+    return this.request('GET', '/otp-security/blocked-ips');
+  }
+
+  async unblockIp(ip: string): Promise<ApiResponse<{ unblocked: string[] }>> {
+    return this.request('POST', '/otp-security/unblock', { ip });
+  }
+
+  async unblockIps(ips: string[]): Promise<ApiResponse<{ unblocked: string[] }>> {
+    return this.request('POST', '/otp-security/unblock', { ips });
+  }
+
+  async getWhitelistedIps(): Promise<ApiResponse<{ ip: string; whitelisted_at: string; whitelisted_by: string; note: string }[]>> {
+    return this.request('GET', '/otp-security/whitelisted-ips');
+  }
+
+  async whitelistIp(ip: string, note: string): Promise<ApiResponse<{ ip: string; note: string }>> {
+    return this.request('POST', '/otp-security/whitelist', { ip, note });
+  }
+
+  async removeWhitelistedIp(ip: string): Promise<ApiResponse<null>> {
+    return this.request('DELETE', '/otp-security/whitelist', { ip });
+  }
+
   async verifyOTP(mobile: string, otp: string): Promise<ApiResponse<AdminLoginResponse>> {
     const response = await this.request<AdminLoginResponse>('POST', '/auth/verify-otp', {
       mobile,
