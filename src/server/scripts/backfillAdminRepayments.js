@@ -70,6 +70,7 @@ async function main() {
   console.log('');
   console.log('Mode:', dryRun ? 'DRY RUN (no writes)' : 'LIVE (will update database)');
   console.log('Scope:', loanId ? `loan_id=${loanId}` : 'ALL loans');
+  console.log('Script version: adminRepaymentSync date-fix v2');
   console.log('');
 
   await initializeDatabase();

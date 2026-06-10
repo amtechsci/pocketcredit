@@ -3,11 +3,7 @@
  * so BS Repayment reports and EMI schedules stay consistent with manual entries.
  */
 
-const {
-  parseEmiSchedule,
-  areAllEmisPaid,
-  evaluateLoanClearanceEligibility
-} = require('./loanClearance');
+const { parseEmiSchedule } = require('./loanClearance');
 
 const ADMIN_REPAYMENT_TX_TYPES = new Set([
   'emi_payment',
@@ -23,15 +19,47 @@ const EMI_PAYMENT_TYPE_SUFFIX = {
   4: 'emi_4th'
 };
 
+/**
+ * Normalize any transaction_date value to YYYY-MM-DD.
+ * Never use String(date).split(' ')[0] — locale strings start with "Wed", "Mon", etc.
+ */
 function normalizeDateOnly(raw) {
-  if (!raw) return new Date().toISOString().split('T')[0];
+  const today = () => {
+    const t = new Date();
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+  };
+
+  if (raw == null || raw === '') return today();
+
+  if (raw instanceof Date) {
+    if (Number.isNaN(raw.getTime())) return today();
+    return `${raw.getFullYear()}-${String(raw.getMonth() + 1).padStart(2, '0')}-${String(raw.getDate()).padStart(2, '0')}`;
+  }
+
   const s = String(raw).trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  if (s.includes('T')) return s.split('T')[0];
-  if (s.includes(' ')) return s.split(' ')[0];
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return new Date().toISOString().split('T')[0];
-  return d.toISOString().split('T')[0];
+
+  const lead = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (lead) return lead[1];
+
+  if (s.includes('T')) {
+    const part = s.split('T')[0];
+    if (/^\d{4}-\d{2}-\d{2}$/.test(part)) return part;
+  }
+
+  const parsed = new Date(s);
+  if (!Number.isNaN(parsed.getTime())) {
+    return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+  }
+
+  return today();
+}
+
+function toMysqlDatetime(dateOnly) {
+  const d = normalizeDateOnly(dateOnly);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+    throw new Error(`Invalid date "${d}" from input ${JSON.stringify(dateOnly)}`);
+  }
+  return `${d} 12:00:00`;
 }
 
 function getFirstUnpaidEmiNumber(emiScheduleRaw) {
@@ -89,14 +117,35 @@ function markAdminEmiPaidInSchedule(emiScheduleRaw, emiNumber, paymentAmount, pa
   };
 }
 
+function emiNumberFromPaymentTypeString(paymentType) {
+  const pt = String(paymentType || '').toLowerCase();
+  if (pt === 'emi_1st') return 1;
+  if (pt === 'emi_2nd') return 2;
+  if (pt === 'emi_3rd') return 3;
+  if (pt === 'emi_4th') return 4;
+  return null;
+}
+
 async function findPaymentOrderByType(executeQuery, loanId, paymentType) {
   const rows = await executeQuery(
-    `SELECT id, order_id, status, amount
+    `SELECT id, order_id, status, amount, payment_type
      FROM payment_orders
      WHERE loan_id = ? AND payment_type = ?
      ORDER BY id DESC
      LIMIT 1`,
     [loanId, paymentType]
+  );
+  return rows[0] || null;
+}
+
+async function findPaymentOrderByTransactionId(executeQuery, loanId, transactionId) {
+  const rows = await executeQuery(
+    `SELECT id, order_id, status, amount, payment_type
+     FROM payment_orders
+     WHERE loan_id = ? AND order_id LIKE ?
+     ORDER BY id DESC
+     LIMIT 1`,
+    [loanId, `%_T${transactionId}`]
   );
   return rows[0] || null;
 }
@@ -110,10 +159,14 @@ async function upsertAdminPaymentOrder(executeQuery, {
   transactionId,
   transactionDate
 }) {
-  const txDate = normalizeDateOnly(transactionDate);
-  const ts = `${txDate} 12:00:00`;
+  const ts = toMysqlDatetime(transactionDate);
   const orderId = `ADMIN_${applicationNumber || loanId}_${paymentType}_T${transactionId}`;
-  const existing = await findPaymentOrderByType(executeQuery, loanId, paymentType);
+
+  const existing =
+    (transactionId != null
+      ? await findPaymentOrderByTransactionId(executeQuery, loanId, transactionId)
+      : null) ||
+    (await findPaymentOrderByType(executeQuery, loanId, paymentType));
 
   if (existing) {
     await executeQuery(
@@ -141,8 +194,7 @@ async function upsertAdminLoanPayment(executeQuery, {
   transactionDate,
   paymentMethod
 }) {
-  const txDate = normalizeDateOnly(transactionDate);
-  const ts = `${txDate} 12:00:00`;
+  const ts = toMysqlDatetime(transactionDate);
   const method = paymentMethod || 'other';
 
   const existing = await executeQuery(
@@ -209,11 +261,21 @@ async function syncAdminRepaymentTransaction(executeQuery, {
   let emiNumber = null;
   let emiScheduleUpdated = false;
 
+  const existingOrderForTx = !dryRun && transaction.id
+    ? await findPaymentOrderByTransactionId(executeQuery, loanId, transaction.id)
+    : null;
+
   if (txType === 'emi_payment') {
     emiNumber = emiNumberOverride;
+
+    if (emiNumber == null && existingOrderForTx?.payment_type) {
+      emiNumber = emiNumberFromPaymentTypeString(existingOrderForTx.payment_type);
+    }
+
     if (emiNumber == null) {
       emiNumber = getFirstUnpaidEmiNumber(emiScheduleArray);
     }
+
     if (emiNumber == null) {
       const suffixMatch = String(transaction.description || '').match(/emi_(\d+(?:st|nd|rd|th))/i);
       if (suffixMatch) {
@@ -221,22 +283,12 @@ async function syncAdminRepaymentTransaction(executeQuery, {
         if (n >= 1 && n <= 4) emiNumber = n;
       }
     }
-    if (emiNumber == null) {
-      const existingOrder = await executeQuery(
-        `SELECT payment_type FROM payment_orders
-         WHERE loan_id = ? AND status = 'PAID' AND payment_type LIKE 'emi_%'
-         ORDER BY updated_at DESC LIMIT 1`,
-        [loanId]
-      );
-      if (existingOrder[0]?.payment_type) {
-        const pt = existingOrder[0].payment_type;
-        if (pt === 'emi_1st') emiNumber = 1;
-        else if (pt === 'emi_2nd') emiNumber = 2;
-        else if (pt === 'emi_3rd') emiNumber = 3;
-        else if (pt === 'emi_4th') emiNumber = 4;
-      }
-    }
+
     if (emiNumber == null) emiNumber = 1;
+
+    if (existingOrderForTx) {
+      skipEmiScheduleUpdate = true;
+    }
 
     if (!skipEmiScheduleUpdate) {
       const markResult = markAdminEmiPaidInSchedule(
@@ -310,7 +362,8 @@ async function backfillAdminRepaymentRecords(executeQuery, { loanId = null, dryR
   let sql = `
     SELECT
       t.id, t.user_id, t.loan_application_id, t.transaction_type, t.amount,
-      t.transaction_date, t.payment_method, t.description, t.status,
+      DATE_FORMAT(t.transaction_date, '%Y-%m-%d') AS transaction_date,
+      t.payment_method, t.description, t.status,
       la.application_number, la.emi_schedule, la.status AS loan_status, la.user_id AS loan_user_id
     FROM transactions t
     INNER JOIN loan_applications la ON la.id = t.loan_application_id
@@ -344,9 +397,16 @@ async function backfillAdminRepaymentRecords(executeQuery, { loanId = null, dryR
 
   for (const [lid, txs] of byLoan) {
     let currentSchedule = txs[0]?.emi_schedule || null;
+    let emiPaymentSeq = 0;
 
     for (const tx of txs) {
       try {
+        let emiNumberOverride = null;
+        if (String(tx.transaction_type || '').toLowerCase() === 'emi_payment') {
+          emiPaymentSeq += 1;
+          emiNumberOverride = emiPaymentSeq;
+        }
+
         const loan = {
           id: lid,
           user_id: tx.loan_user_id || tx.user_id,
@@ -358,7 +418,8 @@ async function backfillAdminRepaymentRecords(executeQuery, { loanId = null, dryR
         const result = await syncAdminRepaymentTransaction(executeQuery, {
           transaction: tx,
           loan,
-          dryRun
+          dryRun,
+          emiNumber: emiNumberOverride
         });
 
         if (result.changed) summary.synced += 1;
