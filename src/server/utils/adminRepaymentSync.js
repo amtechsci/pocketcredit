@@ -71,6 +71,43 @@ function getFirstUnpaidEmiNumber(emiScheduleRaw) {
   return idx === -1 ? null : idx + 1;
 }
 
+async function getGatewayPaidEmiNumbers(executeQuery, loanId) {
+  const rows = await executeQuery(
+    `SELECT payment_type FROM payment_orders
+     WHERE loan_id = ? AND status = 'PAID'
+       AND payment_type IN ('emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th')
+       AND order_id NOT LIKE 'ADMIN_%'`,
+    [loanId]
+  );
+  const nums = new Set();
+  for (const row of rows) {
+    const n = emiNumberFromPaymentTypeString(row.payment_type);
+    if (n) nums.add(n);
+  }
+  return nums;
+}
+
+function revertSpuriousPaidEmis(schedule, allowedPaidEmiNumbers) {
+  const allowed =
+    allowedPaidEmiNumbers instanceof Set
+      ? allowedPaidEmiNumbers
+      : new Set(allowedPaidEmiNumbers);
+  let updated = false;
+  const next = schedule.map((emi, idx) => {
+    const num = idx + 1;
+    if (String(emi?.status || '').toLowerCase() !== 'paid') return emi;
+    if (allowed.has(num)) return emi;
+    updated = true;
+    return {
+      ...emi,
+      status: 'pending',
+      paid_date: null,
+      paid_amount: null
+    };
+  });
+  return { updated, emiScheduleArray: next };
+}
+
 function resolvePaymentTypeForAdminTransaction(txType, emiNumber) {
   const type = String(txType || '').toLowerCase();
   if (type === 'emi_payment') {
@@ -166,14 +203,16 @@ async function upsertAdminPaymentOrder(executeQuery, {
     (transactionId != null
       ? await findPaymentOrderByTransactionId(executeQuery, loanId, transactionId)
       : null) ||
-    (await findPaymentOrderByType(executeQuery, loanId, paymentType));
+    (transactionId == null
+      ? await findPaymentOrderByType(executeQuery, loanId, paymentType)
+      : null);
 
   if (existing) {
     await executeQuery(
       `UPDATE payment_orders
-       SET order_id = ?, status = 'PAID', amount = ?, updated_at = ?
+       SET order_id = ?, payment_type = ?, status = 'PAID', amount = ?, updated_at = ?
        WHERE id = ?`,
-      [orderId, amount, ts, existing.id]
+      [orderId, paymentType, amount, ts, existing.id]
     );
   } else {
     await executeQuery(
@@ -270,7 +309,8 @@ async function syncAdminRepaymentTransaction(executeQuery, {
   loan,
   dryRun = false,
   emiNumber: emiNumberOverride = null,
-  skipEmiScheduleUpdate = false
+  skipEmiScheduleUpdate = false,
+  forceEmiScheduleUpdate = false
 }) {
   const txType = String(transaction.transaction_type || '').toLowerCase();
   if (!ADMIN_REPAYMENT_TX_TYPES.has(txType)) {
@@ -316,7 +356,7 @@ async function syncAdminRepaymentTransaction(executeQuery, {
 
     if (emiNumber == null) emiNumber = 1;
 
-    if (existingOrderForTx) {
+    if (existingOrderForTx && !forceEmiScheduleUpdate) {
       skipEmiScheduleUpdate = true;
     }
 
@@ -426,6 +466,7 @@ async function backfillAdminRepaymentRecords(executeQuery, { loanId = null, dryR
 
   for (const [lid, txs] of byLoan) {
     let currentSchedule = txs[0]?.emi_schedule || null;
+    const adminTargetEmiNumbers = new Set();
     let emiPaymentSeq = 0;
 
     for (const tx of txs) {
@@ -434,6 +475,7 @@ async function backfillAdminRepaymentRecords(executeQuery, { loanId = null, dryR
         if (String(tx.transaction_type || '').toLowerCase() === 'emi_payment') {
           emiPaymentSeq += 1;
           emiNumberOverride = emiPaymentSeq;
+          adminTargetEmiNumbers.add(emiPaymentSeq);
         }
 
         const loan = {
@@ -448,7 +490,8 @@ async function backfillAdminRepaymentRecords(executeQuery, { loanId = null, dryR
           transaction: tx,
           loan,
           dryRun,
-          emiNumber: emiNumberOverride
+          emiNumber: emiNumberOverride,
+          forceEmiScheduleUpdate: true
         });
 
         if (result.changed) summary.synced += 1;
@@ -463,6 +506,30 @@ async function backfillAdminRepaymentRecords(executeQuery, { loanId = null, dryR
           transaction_id: tx.id,
           loan_id: lid,
           message: err.message
+        });
+      }
+    }
+
+    if (!dryRun && adminTargetEmiNumbers.size > 0) {
+      try {
+        const schedule = parseEmiSchedule(currentSchedule);
+        if (schedule && schedule.length > 0) {
+          const gatewayPaid = await getGatewayPaidEmiNumbers(executeQuery, lid);
+          const allowed = new Set([...adminTargetEmiNumbers, ...gatewayPaid]);
+          const revert = revertSpuriousPaidEmis(schedule, allowed);
+          if (revert.updated) {
+            currentSchedule = revert.emiScheduleArray;
+            await executeQuery(
+              `UPDATE loan_applications SET emi_schedule = ?, updated_at = NOW() WHERE id = ?`,
+              [JSON.stringify(currentSchedule), lid]
+            );
+            summary.emiSchedulesFixed += 1;
+          }
+        }
+      } catch (err) {
+        summary.errors.push({
+          loan_id: lid,
+          message: `EMI reconcile failed: ${err.message}`
         });
       }
     }

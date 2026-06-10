@@ -3718,7 +3718,7 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
       }
     }
 
-    // Handle emi_payment transaction type - mark next unpaid EMI as paid (admin entry is authoritative)
+    // Handle emi_payment — always apply to the first unpaid EMI (sequential)
     if (txType === 'emi_payment' && loan_application_id) {
       const loanIdInt = parseInt(loan_application_id);
       const userIdInt = parseInt(userId);
