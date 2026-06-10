@@ -187,35 +187,65 @@ async function upsertAdminPaymentOrder(executeQuery, {
   return orderId;
 }
 
+let loanPaymentsAvailable = null;
+
+async function isLoanPaymentsTableAvailable(executeQuery) {
+  if (loanPaymentsAvailable !== null) return loanPaymentsAvailable;
+  try {
+    const rows = await executeQuery(`
+      SELECT 1
+      FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'loan_payments'
+      LIMIT 1
+    `);
+    loanPaymentsAvailable = rows.length > 0;
+  } catch {
+    loanPaymentsAvailable = false;
+  }
+  return loanPaymentsAvailable;
+}
+
+/**
+ * Optional mirror row for clearance totals. BS Repayment report reads payment_orders.
+ * Uses CASHFREE in payment_method when present (matches gateway enum on this DB).
+ */
 async function upsertAdminLoanPayment(executeQuery, {
   loanId,
   amount,
   orderId,
-  transactionDate,
-  paymentMethod
+  transactionDate
 }) {
+  if (!(await isLoanPaymentsTableAvailable(executeQuery))) {
+    return { skipped: true, reason: 'no_loan_payments_table' };
+  }
+
   const ts = toMysqlDatetime(transactionDate);
-  const method = paymentMethod || 'other';
 
-  const existing = await executeQuery(
-    `SELECT id FROM loan_payments WHERE loan_id = ? AND transaction_id = ?`,
-    [loanId, orderId]
-  );
+  try {
+    const existing = await executeQuery(
+      `SELECT id FROM loan_payments WHERE loan_id = ? AND transaction_id = ?`,
+      [loanId, orderId]
+    );
 
-  if (existing.length > 0) {
-    await executeQuery(
-      `UPDATE loan_payments
-       SET amount = ?, payment_method = ?, status = 'SUCCESS', payment_date = ?
-       WHERE id = ?`,
-      [amount, method, ts, existing[0].id]
-    );
-  } else {
-    await executeQuery(
-      `INSERT INTO loan_payments (
-         loan_id, amount, payment_method, transaction_id, status, payment_date
-       ) VALUES (?, ?, ?, ?, 'SUCCESS', ?)`,
-      [loanId, amount, method, orderId, ts]
-    );
+    if (existing.length > 0) {
+      await executeQuery(
+        `UPDATE loan_payments
+         SET amount = ?, payment_method = 'CASHFREE', status = 'SUCCESS', payment_date = ?
+         WHERE id = ?`,
+        [amount, ts, existing[0].id]
+      );
+    } else {
+      await executeQuery(
+        `INSERT INTO loan_payments (
+           loan_id, amount, payment_method, transaction_id, status, payment_date
+         ) VALUES (?, ?, 'CASHFREE', ?, 'SUCCESS', ?)`,
+        [loanId, amount, orderId, ts]
+      );
+    }
+    return { skipped: false };
+  } catch (err) {
+    console.warn(`[adminRepaymentSync] loan_payments skipped for ${orderId}: ${err.message}`);
+    return { skipped: true, reason: err.message };
   }
 }
 
@@ -341,8 +371,7 @@ async function syncAdminRepaymentTransaction(executeQuery, {
     loanId,
     amount,
     orderId,
-    transactionDate: txDate,
-    paymentMethod: transaction.payment_method
+    transactionDate: txDate
   });
 
   await linkTransactionToPaymentOrder(executeQuery, transaction.id, orderId);
