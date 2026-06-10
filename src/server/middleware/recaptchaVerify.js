@@ -10,22 +10,23 @@ const MIN_SCORE = parseFloat(process.env.RECAPTCHA_MIN_SCORE || '0.5');
  * Reads `recaptcha_token` from req.body, verifies it with Google, and rejects
  * requests whose score falls below MIN_SCORE (default 0.5).
  *
- * Skip conditions (fail-open so development is not blocked):
- *   - RECAPTCHA_SECRET_KEY env var is not set
- *   - NODE_ENV !== 'production'  (optional override via RECAPTCHA_ENFORCE=true)
+ * Enforcement is FULLY OPT-IN — both conditions must be true to activate:
+ *   1. RECAPTCHA_SECRET_KEY is set in env
+ *   2. RECAPTCHA_ENFORCE=true is explicitly set in env
+ *
+ * This prevents accidental lockouts when keys are not yet configured.
+ * Set RECAPTCHA_ENFORCE=true only AFTER adding both keys and rebuilding the frontend.
  *
  * Required env vars:
  *   RECAPTCHA_SECRET_KEY   – server-side secret from Google reCAPTCHA console
- *   RECAPTCHA_MIN_SCORE    – (optional) threshold, default 0.5
- *   RECAPTCHA_ENFORCE      – set to "true" to enforce in non-production envs
+ *   RECAPTCHA_ENFORCE      – must be exactly "true" to activate (default: off)
+ *   RECAPTCHA_MIN_SCORE    – (optional) score threshold, default 0.5
  */
 async function recaptchaVerify(req, res, next) {
-  const enforce =
-    process.env.RECAPTCHA_ENFORCE === 'true' ||
-    process.env.NODE_ENV === 'production';
+  // Only enforce when BOTH the secret key AND the explicit opt-in flag are set
+  const enforce = process.env.RECAPTCHA_ENFORCE === 'true' && !!RECAPTCHA_SECRET;
 
-  // Skip if not configured or not in an enforced environment
-  if (!RECAPTCHA_SECRET || !enforce) {
+  if (!enforce) {
     return next();
   }
 

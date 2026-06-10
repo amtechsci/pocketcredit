@@ -7,11 +7,19 @@ import "./styles/globals.css";
 
 const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || '';
 
-createRoot(document.getElementById("root")!).render(
-  <BrowserRouter>
+// Only activate reCAPTCHA when a valid site key is provided.
+// Without a key, GoogleReCaptchaProvider errors and breaks the app.
+const AppWithRecaptcha = RECAPTCHA_SITE_KEY
+  ? (
     <GoogleReCaptchaProvider reCaptchaKey={RECAPTCHA_SITE_KEY} useEnterprise={false}>
       <App />
     </GoogleReCaptchaProvider>
+  )
+  : <App />;
+
+createRoot(document.getElementById("root")!).render(
+  <BrowserRouter>
+    {AppWithRecaptcha}
   </BrowserRouter>
 );
   
