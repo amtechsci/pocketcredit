@@ -14,11 +14,13 @@ const { generateKFSHTML } = require('../utils/kfsHtmlGenerator');
 const { generateLoanAgreementHTML } = require('../utils/loanAgreementHtmlGenerator');
 const { calculatePaymentAmount } = require('../utils/paymentAmount');
 const {
-  areAllEmisPaid,
-  applyPaymentToEmi,
-  evaluateLoanClearanceEligibility,
-  getEmiDueAmount
+  evaluateLoanClearanceEligibility
 } = require('../utils/loanClearance');
+const {
+  getFirstUnpaidEmiNumber,
+  markAdminEmiPaidInSchedule,
+  syncAdminRepaymentTransaction
+} = require('../utils/adminRepaymentSync');
 const { v4: uuidv4 } = require('uuid');
 
 const router = express.Router();
@@ -3491,7 +3493,7 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
 
       // Verify loan exists and get loan data (including plan_snapshot for credit limit check)
       const loans = await executeQuery(
-        'SELECT id, user_id, status, plan_snapshot, total_repayable, emi_schedule FROM loan_applications WHERE id = ?',
+        'SELECT id, user_id, status, application_number, plan_snapshot, total_repayable, emi_schedule FROM loan_applications WHERE id = ?',
         [loanIdInt]
       );
 
@@ -3524,6 +3526,30 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
           );
 
           console.log(`✅ Loan #${loanIdInt} marked as cleared (${txType} received)`);
+
+          try {
+            await syncAdminRepaymentTransaction(executeQuery, {
+              transaction: {
+                id: transactionId,
+                user_id: userIdInt,
+                loan_application_id: loanIdInt,
+                transaction_type: txType,
+                amount,
+                transaction_date: txDate,
+                payment_method: validPaymentMethod,
+                status: txStatus
+              },
+              loan: {
+                id: loanIdInt,
+                user_id: userIdInt,
+                application_number: loan.application_number,
+                emi_schedule: loan.emi_schedule,
+                status: 'cleared'
+              }
+            });
+          } catch (syncErr) {
+            console.error('❌ Admin repayment sync failed for full/settlement (non-fatal):', syncErr.message);
+          }
 
           // Trigger automatic event-based SMS (loan_cleared)
           try {
@@ -3692,27 +3718,24 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
       }
     }
 
-    // Handle emi_payment transaction type - mark next unpaid EMI as paid
+    // Handle emi_payment transaction type - mark next unpaid EMI as paid (admin entry is authoritative)
     if (txType === 'emi_payment' && loan_application_id) {
       const loanIdInt = parseInt(loan_application_id);
       const userIdInt = parseInt(userId);
 
       console.log(`💳 Processing EMI payment for loan #${loanIdInt}, user #${userIdInt}`);
 
-      // Get loan with emi_schedule and total_repayable (for closed_amount when clearing)
       const loans = await executeQuery(
-        'SELECT id, user_id, status, emi_schedule, plan_snapshot, total_repayable FROM loan_applications WHERE id = ?',
+        'SELECT id, user_id, status, application_number, emi_schedule, plan_snapshot, total_repayable FROM loan_applications WHERE id = ?',
         [loanIdInt]
       );
 
       if (loans.length > 0) {
         const loan = loans[0];
-        
-        // Check ownership
+
         if (loan.user_id == userIdInt || loan.user_id == userId) {
           console.log(`✅ Loan ownership confirmed. Current status: ${loan.status}`);
 
-          // Parse emi_schedule
           let emiSchedule = loan.emi_schedule;
           if (typeof emiSchedule === 'string') {
             try {
@@ -3723,275 +3746,114 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
             }
           }
 
-          if (emiSchedule && Array.isArray(emiSchedule)) {
-            // Find the first unpaid EMI
-            const unpaidEmiIndex = emiSchedule.findIndex(emi => emi.status !== 'paid');
-            
-            if (unpaidEmiIndex !== -1) {
-              const emiNumber = unpaidEmiIndex + 1;
-              const paymentAmount = parseFloat(amount) || 0;
-              const emiDue = getEmiDueAmount(emiSchedule[unpaidEmiIndex]);
-              const paidDate = txDate || new Date().toISOString().split('T')[0];
+          const emiNumber = getFirstUnpaidEmiNumber(emiSchedule);
+          const paymentAmount = parseFloat(amount) || 0;
+          const paidDate = txDate || new Date().toISOString().split('T')[0];
 
-              emiSchedule[unpaidEmiIndex] = applyPaymentToEmi(
-                emiSchedule[unpaidEmiIndex],
-                paymentAmount,
-                paidDate
-              );
+          if (emiNumber != null && emiSchedule && Array.isArray(emiSchedule)) {
+            const markResult = markAdminEmiPaidInSchedule(
+              emiSchedule,
+              emiNumber,
+              paymentAmount,
+              paidDate
+            );
 
-              const emiNowPaid = String(emiSchedule[unpaidEmiIndex].status || '').toLowerCase() === 'paid';
-              console.log(
-                emiNowPaid
-                  ? `📌 EMI #${emiNumber} fully paid (₹${paymentAmount} / due ₹${emiDue})`
-                  : `📌 EMI #${emiNumber} partial payment ₹${paymentAmount} recorded (due ₹${emiDue}) — EMI still pending`
-              );
-
+            if (markResult.updated && markResult.emiScheduleArray) {
+              emiSchedule = markResult.emiScheduleArray;
               await executeQuery(
                 'UPDATE loan_applications SET emi_schedule = ?, updated_at = NOW() WHERE id = ?',
                 [JSON.stringify(emiSchedule), loanIdInt]
               );
-              
-              // Also create/update payment_orders record to match payment validation logic
-              // This ensures payment validation sees the paid status
-              let paymentTypeSuffix = '1st';
-              if (emiNumber === 1) paymentTypeSuffix = '1st';
-              else if (emiNumber === 2) paymentTypeSuffix = '2nd';
-              else if (emiNumber === 3) paymentTypeSuffix = '3rd';
-              else paymentTypeSuffix = `${emiNumber}th`;
-              const paymentType = `emi_${paymentTypeSuffix}`;
-              const orderAmount = paymentAmount;
+              console.log(`📌 EMI #${emiNumber} marked paid by admin (₹${paymentAmount})`);
+            }
 
-              // Check if payment order already exists
-              const existingOrders = await executeQuery(
-                'SELECT id FROM payment_orders WHERE loan_id = ? AND payment_type = ?',
-                [loanIdInt, paymentType]
+            try {
+              await syncAdminRepaymentTransaction(executeQuery, {
+                transaction: {
+                  id: transactionId,
+                  user_id: userIdInt,
+                  loan_application_id: loanIdInt,
+                  transaction_type: txType,
+                  amount: paymentAmount,
+                  transaction_date: paidDate,
+                  payment_method: validPaymentMethod,
+                  status: txStatus
+                },
+                loan: {
+                  ...loan,
+                  emi_schedule: emiSchedule
+                },
+                emiNumber,
+                skipEmiScheduleUpdate: true
+              });
+            } catch (syncErr) {
+              console.error('❌ Admin repayment sync failed for EMI (non-fatal):', syncErr.message);
+            }
+
+            const totalEmis = emiSchedule.length;
+            const paidEmis = emiSchedule.filter(
+              (emi) => String(emi.status || '').toLowerCase() === 'paid'
+            ).length;
+            console.log(`📊 EMI status: ${paidEmis}/${totalEmis} fully paid.`);
+
+            const clearance = await evaluateLoanClearanceEligibility({
+              executeQuery,
+              loan: { ...loan, emi_schedule: emiSchedule },
+              emiSchedule
+            });
+
+            if (clearance.shouldClear) {
+              const closedAmount = clearance.amountDue || parseFloat(loan.total_repayable) || 0;
+              const closedDate = txDate;
+              await executeQuery(
+                `UPDATE loan_applications 
+                 SET status = 'cleared', closed_date = ?, closed_amount = ?, updated_at = NOW()
+                 WHERE id = ?`,
+                [closedDate, closedAmount, loanIdInt]
               );
 
-              if (existingOrders.length > 0) {
-                // Update existing order to PAID
-                await executeQuery(
-                  `UPDATE payment_orders 
-                   SET status = 'PAID', amount = ?, updated_at = NOW() 
-                   WHERE loan_id = ? AND payment_type = ?`,
-                  [orderAmount, loanIdInt, paymentType]
-                );
-                console.log(`✅ Updated existing payment_order for ${paymentType} to PAID (₹${orderAmount})`);
-              } else {
-                // Create new payment order record
-                const orderId = `ADMIN_${loan.application_number || loanIdInt}_${paymentType}_${Date.now()}`;
-                await executeQuery(
-                  `INSERT INTO payment_orders (order_id, loan_id, user_id, amount, payment_type, status, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, 'PAID', NOW(), NOW())`,
-                  [orderId, loanIdInt, userIdInt, orderAmount, paymentType]
-                );
-                console.log(`✅ Created payment_order record for ${paymentType} with status PAID (₹${orderAmount})`);
+              console.log(
+                `✅ Loan #${loanIdInt} marked as cleared (paid ₹${clearance.totalPaid} / due ₹${closedAmount})`
+              );
+
+              try {
+                const { triggerEventSMS } = require('../utils/eventSmsTrigger');
+                await triggerEventSMS('loan_cleared', {
+                  userId: loan.user_id,
+                  loanId: loanIdInt
+                });
+              } catch (smsError) {
+                console.error('❌ Error sending loan_cleared SMS (non-fatal):', smsError);
               }
 
-              // Check if all EMIs are now paid
-              const allEmisPaid = areAllEmisPaid(emiSchedule);
-              const totalEmis = emiSchedule.length;
-              const paidEmis = emiSchedule.filter(emi => String(emi.status || '').toLowerCase() === 'paid').length;
-
-              console.log(`📊 EMI status: ${paidEmis}/${totalEmis} fully paid. All paid: ${allEmisPaid}`);
-
-              const clearance = await evaluateLoanClearanceEligibility({
-                executeQuery,
-                loan: { ...loan, emi_schedule: emiSchedule },
-                emiSchedule
-              });
-
-              if (emiNowPaid && !clearance.shouldClear) {
-                try {
-                  const { triggerEventSMS } = require('../utils/eventSmsTrigger');
-                  await triggerEventSMS('emi_cleared', {
-                    userId: loan.user_id,
-                    loanId: loanIdInt,
-                    variables: {
-                      emi_number: emiNumber.toString()
-                    }
-                  });
-                } catch (smsError) {
-                  console.error('❌ Error sending emi_cleared SMS (non-fatal):', smsError);
+              try {
+                const { runCoolingPeriodCheckAfterLoanClear } = require('../utils/creditLimitCalculator');
+                const cooled = await runCoolingPeriodCheckAfterLoanClear(loan.user_id, loanIdInt);
+                if (cooled) {
+                  console.log(`[UserProfile] User ${loan.user_id} moved to cooling period after clearing loan #${loanIdInt}`);
                 }
+              } catch (coolingPeriodError) {
+                console.error('❌ Error checking cooling period after loan clearance (non-fatal):', coolingPeriodError);
               }
 
-              if (clearance.shouldClear) {
-                const closedAmount = clearance.amountDue || parseFloat(loan.total_repayable) || 0;
-                const closedDate = txDate;
-                await executeQuery(
-                  `UPDATE loan_applications 
-                   SET status = 'cleared', closed_date = ?, closed_amount = ?, updated_at = NOW()
-                   WHERE id = ?`,
-                  [closedDate, closedAmount, loanIdInt]
-                );
-
-                console.log(
-                  `✅ Loan #${loanIdInt} marked as cleared (paid ₹${clearance.totalPaid} / due ₹${closedAmount})`
-                );
-
-                // Trigger automatic event-based SMS (loan_cleared)
-                try {
-                  const { triggerEventSMS } = require('../utils/eventSmsTrigger');
-                  await triggerEventSMS('loan_cleared', {
-                    userId: loan.user_id,
-                    loanId: loanIdInt
-                  });
-                } catch (smsError) {
-                  console.error('❌ Error sending loan_cleared SMS (non-fatal):', smsError);
-                  // Don't fail - SMS failure shouldn't block loan clearance
-                }
-
-                // Check if user should be moved to cooling period after clearing this loan
-                try {
-                  const { runCoolingPeriodCheckAfterLoanClear } = require('../utils/creditLimitCalculator');
-                  const cooled = await runCoolingPeriodCheckAfterLoanClear(loan.user_id, loanIdInt);
-                  if (cooled) {
-                    console.log(`[UserProfile] User ${loan.user_id} moved to cooling period after clearing loan #${loanIdInt}`);
+              loanStatusUpdated = true;
+              newStatus = 'cleared';
+            } else if (markResult.emiFullyPaid) {
+              try {
+                const { triggerEventSMS } = require('../utils/eventSmsTrigger');
+                await triggerEventSMS('emi_cleared', {
+                  userId: loan.user_id,
+                  loanId: loanIdInt,
+                  variables: {
+                    emi_number: emiNumber.toString()
                   }
-                } catch (coolingPeriodError) {
-                  console.error('❌ Error checking cooling period after loan clearance (non-fatal):', coolingPeriodError);
-                }
-
-                // Send NOC email to user
-                try {
-                  const emailService = require('../services/emailService');
-                  const pdfService = require('../services/pdfService');
-
-                  // Get loan details for NOC
-                  const loanDetails = await executeQuery(`
-                    SELECT 
-                      la.*,
-                      u.first_name, u.last_name, u.email, u.personal_email, u.official_email, 
-                      u.phone, u.date_of_birth, u.gender, u.marital_status, u.pan_number
-                    FROM loan_applications la
-                    INNER JOIN users u ON la.user_id = u.id
-                    WHERE la.id = ?
-                  `, [loanIdInt]);
-
-                  if (loanDetails && loanDetails.length > 0) {
-                    const loanDetail = loanDetails[0];
-                    const recipientEmail = loanDetail.personal_email || loanDetail.official_email || loanDetail.email;
-                    const recipientName = `${loanDetail.first_name || ''} ${loanDetail.last_name || ''}`.trim() || 'User';
-
-                    if (recipientEmail) {
-                      const formatDate = (dateString) => {
-                        if (!dateString || dateString === 'N/A') return 'N/A';
-                        try {
-                          if (typeof dateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
-                            const [year, month, day] = dateString.split('-');
-                            return `${day}-${month}-${year}`;
-                          }
-                          if (typeof dateString === 'string' && dateString.includes('T')) {
-                            const datePart = dateString.split('T')[0];
-                            if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
-                              const [year, month, day] = datePart.split('-');
-                              return `${day}-${month}-${year}`;
-                            }
-                          }
-                          if (typeof dateString === 'string' && dateString.includes(' ')) {
-                            const datePart = dateString.split(' ')[0];
-                            if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
-                              const [year, month, day] = datePart.split('-');
-                              return `${day}-${month}-${year}`;
-                            }
-                          }
-                          const date = new Date(dateString);
-                          const day = String(date.getDate()).padStart(2, '0');
-                          const month = String(date.getMonth() + 1).padStart(2, '0');
-                          const year = date.getFullYear();
-                          return `${day}-${month}-${year}`;
-                        } catch {
-                          return dateString;
-                        }
-                      };
-
-                      const borrowerName = recipientName;
-                      const applicationNumber = loanDetail.application_number || loanIdInt;
-                      const shortLoanId = `PLL${loanIdInt}`;
-                      const todayDate = formatDate(new Date().toISOString());
-
-                      const htmlContent = `
-                        <div style="font-family: 'Times New Roman', Times, serif; font-size: 11pt; line-height: 1.6; background-color: white;">
-                          <div style="padding: 32px;">
-                            <div style="text-align: center; margin-bottom: 16px; border-bottom: 1px solid #000; padding-bottom: 8px;">
-                              <h2 style="font-weight: bold; margin-bottom: 4px; font-size: 14pt;">
-                                SPHEETI FINTECH PRIVATE LIMITED
-                              </h2>
-                              <p style="font-size: 12px; margin-bottom: 4px;">
-                                CIN: U65929MH2018PTC306088 | RBI Registration no: N-13.02361
-                              </p>
-                              <p style="font-size: 12px; margin-bottom: 8px;">
-                                Mahadev Compound Gala No. A7, Dhobi Ghat Road, Ulhasnagar MUMBAI, MAHARASHTRA, 421001
-                              </p>
-                            </div>
-                            <div style="text-align: center; margin-bottom: 24px;">
-                              <h1 style="font-weight: bold; font-size: 13pt; text-transform: uppercase;">
-                                NO DUES CERTIFICATE
-                              </h1>
-                            </div>
-                            <div style="margin-bottom: 16px;">
-                              <p style="font-size: 12px;"><strong>Date :</strong> ${todayDate}</p>
-                            </div>
-                            <div style="margin-bottom: 16px;">
-                              <p style="font-size: 12px;"><strong>Name of the Customer:</strong> ${borrowerName}</p>
-                            </div>
-                            <div style="margin-bottom: 16px;">
-                              <p style="font-size: 12px;"><strong>Sub: No Dues Certificate for Loan ID - ${shortLoanId}</strong></p>
-                            </div>
-                            <div style="margin-bottom: 16px;">
-                              <p style="font-weight: bold;">Dear Sir/Madam,</p>
-                            </div>
-                            <div style="margin-bottom: 24px; text-align: justify;">
-                              <p>This letter is to confirm that Spheeti Fintech Private Limited has received payment for the aforesaid loan ID and no amount is outstanding and payable by you to the Company under the aforesaid loan ID.</p>
-                            </div>
-                            <div style="margin-top: 32px;">
-                              <p style="margin-bottom: 4px; font-weight: bold;">Thanking you,</p>
-                              <p style="font-weight: bold;">On behalf of Spheeti Fintech Private Limited</p>
-                            </div>
-                          </div>
-                        </div>
-                      `;
-
-                      // Generate PDF
-                      const filename = `No_Dues_Certificate_${applicationNumber}.pdf`;
-                      const pdfResult = await pdfService.generateKFSPDF(htmlContent, filename);
-                      let pdfBuffer = Buffer.isBuffer(pdfResult) ? pdfResult : (pdfResult.buffer || pdfResult);
-                      if (!Buffer.isBuffer(pdfBuffer) && pdfBuffer instanceof Uint8Array) {
-                        pdfBuffer = Buffer.from(pdfBuffer);
-                      }
-
-                      // Send email
-                      await emailService.sendNOCEmail({
-                        loanId: loanIdInt,
-                        recipientEmail: recipientEmail,
-                        recipientName: recipientName,
-                        loanData: {
-                          application_number: applicationNumber,
-                          loan_amount: loanDetail.loan_amount || loanDetail.sanctioned_amount || 0
-                        },
-                        pdfBuffer: pdfBuffer,
-                        pdfFilename: filename,
-                        sentBy: null
-                      });
-
-                      console.log(`✅ NOC email sent successfully to ${recipientEmail} for loan #${loanIdInt} (all EMIs paid)`);
-                    }
-                  }
-                } catch (nocEmailError) {
-                  console.error('❌ Error sending NOC email (non-fatal):', nocEmailError);
-                }
-
-                loanStatusUpdated = true;
-                newStatus = 'cleared';
-              } else {
-                const reason = clearance.reason || 'outstanding_remaining';
-                console.log(
-                  `ℹ️ Loan #${loanIdInt} not cleared after EMI #${emiNumber} payment (${reason}; paid ₹${clearance.totalPaid ?? 'n/a'} / due ₹${clearance.amountDue ?? 'n/a'})`
-                );
+                });
+              } catch (smsError) {
+                console.error('❌ Error sending emi_cleared SMS (non-fatal):', smsError);
               }
-            } else {
-              console.log('ℹ️ All EMIs already paid for this loan');
             }
+          } else if (emiNumber == null) {
+            console.log('ℹ️ All EMIs already paid for this loan');
           } else {
             console.warn('⚠️ Could not find valid emi_schedule for loan');
           }
@@ -4000,6 +3862,38 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
         }
       } else {
         console.warn(`⚠️ Loan #${loanIdInt} not found`);
+      }
+    }
+
+    // Sync part_payment into payment_orders for BS repayment reporting
+    if (txType === 'part_payment' && loan_application_id) {
+      const loanIdInt = parseInt(loan_application_id);
+      const userIdInt = parseInt(userId);
+      const loans = await executeQuery(
+        'SELECT id, user_id, application_number, emi_schedule, status FROM loan_applications WHERE id = ?',
+        [loanIdInt]
+      );
+      if (loans.length > 0) {
+        const loan = loans[0];
+        if (loan.user_id == userIdInt || loan.user_id == userId) {
+          try {
+            await syncAdminRepaymentTransaction(executeQuery, {
+              transaction: {
+                id: transactionId,
+                user_id: userIdInt,
+                loan_application_id: loanIdInt,
+                transaction_type: txType,
+                amount,
+                transaction_date: txDate,
+                payment_method: validPaymentMethod,
+                status: txStatus
+              },
+              loan
+            });
+          } catch (syncErr) {
+            console.error('❌ Admin repayment sync failed for part_payment (non-fatal):', syncErr.message);
+          }
+        }
       }
     }
 

@@ -10,6 +10,7 @@ const {
     getTodayString
 } = require('../utils/loanCalculations');
 const loanCalculationsRoute = require('./loanCalculations');
+const { backfillAdminRepaymentRecords } = require('../utils/adminRepaymentSync');
 
 const router = express.Router();
 
@@ -1506,6 +1507,11 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                       AND (
                           t.description LIKE CONCAT('%Order: ', po.order_id, '%')
                           OR t.reference_number = po.order_id
+                          OR (
+                              t.transaction_type IN ('emi_payment', 'full_payment', 'settlement', 'part_payment')
+                              AND DATE(t.transaction_date) = DATE(COALESCE(lp.payment_date, po.updated_at))
+                              AND ABS(t.amount - COALESCE(lp.amount, po.amount)) < 0.02
+                          )
                       )
                     ORDER BY t.id DESC
                     LIMIT 1
@@ -1831,6 +1837,40 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
     } catch (error) {
         console.error('Error generating BS repayment report:', error);
         res.status(500).json({ status: 'error', message: 'Failed to generate report', error: error.message });
+    }
+});
+
+/**
+ * POST /api/admin/reports/backfill-admin-repayments
+ * Sync historical admin repayment transactions into payment_orders / loan_payments
+ * and repair emi_schedule paid status for manual EMI entries.
+ * Query: loan_id (optional), dry_run=true (optional)
+ */
+router.post('/backfill-admin-repayments', authenticateAdmin, async (req, res) => {
+    try {
+        await initializeDatabase();
+        const loanId = req.query.loan_id || req.body?.loan_id || null;
+        const dryRun = String(req.query.dry_run || req.body?.dry_run || '').toLowerCase() === 'true';
+
+        const summary = await backfillAdminRepaymentRecords(executeQuery, {
+            loanId: loanId ? parseInt(loanId, 10) : null,
+            dryRun
+        });
+
+        res.json({
+            status: 'success',
+            message: dryRun
+                ? 'Dry run completed — no database changes were made'
+                : 'Admin repayment backfill completed',
+            data: summary
+        });
+    } catch (error) {
+        console.error('Error backfilling admin repayments:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to backfill admin repayments',
+            error: error.message
+        });
     }
 });
 
