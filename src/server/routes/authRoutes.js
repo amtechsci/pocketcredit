@@ -1,7 +1,6 @@
 const express = require('express');
 const { sendOtp, verifyOtp, getProfile, logout } = require('../controllers/authController');
 const { otpIpGuard } = require('../middleware/otpIpGuard');
-const { recaptchaVerify } = require('../middleware/recaptchaVerify');
 
 const router = express.Router();
 
@@ -15,7 +14,7 @@ const router = express.Router();
  * @desc    Send OTP to mobile number
  * @access  Public
  */
-router.post('/send-otp', otpIpGuard, recaptchaVerify, sendOtp);
+router.post('/send-otp', otpIpGuard, sendOtp);
 
 /**
  * @route   POST /api/auth/verify-otp

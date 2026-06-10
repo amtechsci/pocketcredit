@@ -259,8 +259,8 @@ class AdminApiService {
   }
 
   // Admin Mobile OTP APIs
-  async sendOTP(mobile: string, recaptchaToken?: string): Promise<ApiResponse<{ mobile: string; expiresIn: number }>> {
-    return this.request('POST', '/auth/send-otp', { mobile, recaptcha_token: recaptchaToken || '' });
+  async sendOTP(mobile: string): Promise<ApiResponse<{ mobile: string; expiresIn: number }>> {
+    return this.request('POST', '/auth/send-otp', { mobile });
   }
 
   // OTP Security — IP block / whitelist management

@@ -8,7 +8,6 @@ const { set, get, del, getRedisClient } = require('../config/redis');
 const { v4: uuidv4 } = require('uuid');
 const { smsService } = require('../utils/smsService');
 const { otpIpGuard } = require('../middleware/otpIpGuard');
-const { recaptchaVerify } = require('../middleware/recaptchaVerify');
 const router = express.Router();
 
 // Initialize database connection
@@ -157,7 +156,7 @@ router.post('/logout', async (req, res) => {
 });
 
 // Admin Send OTP (Mobile)
-router.post('/send-otp', otpIpGuard, recaptchaVerify, async (req, res) => {
+router.post('/send-otp', otpIpGuard, async (req, res) => {
   try {
     const { mobile } = req.body;
 
