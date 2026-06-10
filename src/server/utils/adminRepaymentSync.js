@@ -427,7 +427,11 @@ async function syncAdminRepaymentTransaction(executeQuery, {
   };
 }
 
-async function backfillAdminRepaymentRecords(executeQuery, { loanId = null, dryRun = false } = {}) {
+async function backfillAdminRepaymentRecords(executeQuery, {
+  loanId = null,
+  loanIds = null,
+  dryRun = false
+} = {}) {
   let sql = `
     SELECT
       t.id, t.user_id, t.loan_application_id, t.transaction_type, t.amount,
@@ -441,9 +445,13 @@ async function backfillAdminRepaymentRecords(executeQuery, { loanId = null, dryR
       AND t.loan_application_id IS NOT NULL
   `;
   const params = [];
-  if (loanId != null) {
-    sql += ' AND t.loan_application_id = ?';
-    params.push(loanId);
+  const scopedIds = Array.isArray(loanIds) && loanIds.length > 0
+    ? loanIds.map((id) => parseInt(id, 10)).filter((id) => Number.isFinite(id) && id > 0)
+    : (loanId != null ? [parseInt(loanId, 10)] : null);
+
+  if (scopedIds && scopedIds.length > 0) {
+    sql += ` AND t.loan_application_id IN (${scopedIds.map(() => '?').join(', ')})`;
+    params.push(...scopedIds);
   }
   sql += ' ORDER BY t.loan_application_id ASC, t.transaction_date ASC, t.id ASC';
 
@@ -458,9 +466,11 @@ async function backfillAdminRepaymentRecords(executeQuery, { loanId = null, dryR
 
   const summary = {
     loans: byLoan.size,
+    loanIdsRequested: scopedIds?.length || null,
     transactions: rows.length,
     synced: 0,
     emiSchedulesFixed: 0,
+    spuriousEmisReverted: 0,
     errors: []
   };
 
@@ -524,6 +534,7 @@ async function backfillAdminRepaymentRecords(executeQuery, { loanId = null, dryR
               [JSON.stringify(currentSchedule), lid]
             );
             summary.emiSchedulesFixed += 1;
+            summary.spuriousEmisReverted += 1;
           }
         }
       } catch (err) {

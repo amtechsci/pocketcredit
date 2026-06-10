@@ -1844,16 +1844,26 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
  * POST /api/admin/reports/backfill-admin-repayments
  * Sync historical admin repayment transactions into payment_orders / loan_payments
  * and repair emi_schedule paid status for manual EMI entries.
- * Query: loan_id (optional), dry_run=true (optional)
+ * Query: loan_id (optional), loan_ids (optional comma-separated), dry_run=true (optional)
  */
 router.post('/backfill-admin-repayments', authenticateAdmin, async (req, res) => {
     try {
         await initializeDatabase();
         const loanId = req.query.loan_id || req.body?.loan_id || null;
+        const loanIdsRaw = req.query.loan_ids || req.body?.loan_ids || null;
         const dryRun = String(req.query.dry_run || req.body?.dry_run || '').toLowerCase() === 'true';
 
+        let loanIds = null;
+        if (loanIdsRaw) {
+            loanIds = String(loanIdsRaw)
+                .split(',')
+                .map((s) => parseInt(s.trim().replace(/^PLL/i, ''), 10))
+                .filter((id) => Number.isFinite(id) && id > 0);
+        }
+
         const summary = await backfillAdminRepaymentRecords(executeQuery, {
-            loanId: loanId ? parseInt(loanId, 10) : null,
+            loanId: loanIds?.length ? null : (loanId ? parseInt(loanId, 10) : null),
+            loanIds: loanIds?.length ? loanIds : null,
             dryRun
         });
 
