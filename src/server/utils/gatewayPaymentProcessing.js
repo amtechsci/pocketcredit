@@ -140,6 +140,52 @@ async function orderHasGatewayTransaction(executeQuery, loanId, orderId, bankRef
   return rows.length > 0;
 }
 
+async function getWebhookUtrForOrder(executeQuery, orderId, webhookData = null) {
+  const fromOrder = parseBankReferenceFromWebhookData(webhookData);
+  if (fromOrder) return fromOrder;
+  const [wl] = await executeQuery(
+    `SELECT body_data FROM webhook_logs
+     WHERE webhook_type = 'payment_gateway' AND client_ref_num = ?
+     ORDER BY created_at DESC LIMIT 1`,
+    [orderId]
+  );
+  return parseBankReferenceFromWebhookData(wl?.body_data);
+}
+
+/** True when order id, webhook UTR, or loan_payments row matches a transaction. */
+async function orderHasGatewayLedger(executeQuery, { loan_id: loanId, order_id: orderId, webhook_data: webhookData }) {
+  const utr = await getWebhookUtrForOrder(executeQuery, orderId, webhookData);
+  if (await orderHasGatewayTransaction(executeQuery, loanId, orderId, utr || orderId)) {
+    return true;
+  }
+  const lp = await executeQuery(
+    `SELECT id FROM loan_payments WHERE loan_id = ? AND transaction_id = ? LIMIT 1`,
+    [loanId, orderId]
+  );
+  if (lp.length === 0) {
+    return false;
+  }
+  // loan_payments exists — confirm a repayment transaction exists for this loan
+  const tx = await executeQuery(
+    `SELECT id FROM transactions
+     WHERE loan_application_id = ?
+       AND transaction_type IN ('emi_payment', 'part_payment', 'full_payment', 'credit')
+     LIMIT 1`,
+    [loanId]
+  );
+  return tx.length > 0;
+}
+
+async function filterUnresolvedGatewayGaps(executeQuery, rows) {
+  const unresolved = [];
+  for (const row of rows) {
+    if (!(await orderHasGatewayLedger(executeQuery, row))) {
+      unresolved.push(row);
+    }
+  }
+  return unresolved;
+}
+
 /**
  * Backfill missing loan_payments / transactions for PAID Cashfree orders (global repair).
  */
@@ -193,13 +239,13 @@ async function repairGatewayLedgerFromPaidOrders(executeQuery, {
 
   for (let i = 0; i < orders.length; i++) {
     const order = orders[i];
-    const bankReferenceNumber = parseBankReferenceFromWebhookData(order.webhook_data);
-    const hasTx = await orderHasGatewayTransaction(
-      executeQuery,
-      order.loan_id,
-      order.order_id,
-      bankReferenceNumber
-    );
+    const bankReferenceNumber = parseBankReferenceFromWebhookData(order.webhook_data)
+      || (await getWebhookUtrForOrder(executeQuery, order.order_id, order.webhook_data));
+    const hasTx = await orderHasGatewayLedger(executeQuery, {
+      loan_id: order.loan_id,
+      order_id: order.order_id,
+      webhook_data: order.webhook_data
+    });
 
     if (hasTx) {
       summary.skipped++;
@@ -271,9 +317,10 @@ async function findGatewayPaymentGaps(executeQuery, { sinceDate = null } = {}) {
   const dateFilter = sinceDate ? ' AND po.created_at >= ?' : '';
   const dateParams = sinceDate ? [sinceDate] : [];
 
-  const paidMissingTransaction = await executeQuery(
+  const paidMissingTransactionRaw = await executeQuery(
     `SELECT po.order_id, po.loan_id, la.application_number, la.status AS loan_status,
-            po.amount, po.payment_type, po.status AS order_status, po.updated_at
+            po.amount, po.payment_type, po.status AS order_status, po.updated_at,
+            po.webhook_data
      FROM payment_orders po
      JOIN loan_applications la ON la.id = po.loan_id
      WHERE po.status = 'PAID'
@@ -294,9 +341,9 @@ async function findGatewayPaymentGaps(executeQuery, { sinceDate = null } = {}) {
     dateParams
   );
 
-  const webhookSuccessNotApplied = await executeQuery(
+  const webhookSuccessNotAppliedRaw = await executeQuery(
     `SELECT po.order_id, po.loan_id, la.application_number, la.status AS loan_status,
-            po.amount, po.payment_type, po.status AS order_status,
+            po.amount, po.payment_type, po.status AS order_status, po.webhook_data,
             MAX(wl.created_at) AS last_webhook_at,
             MAX(wl.id) AS last_webhook_id
      FROM payment_orders po
@@ -320,10 +367,13 @@ async function findGatewayPaymentGaps(executeQuery, { sinceDate = null } = {}) {
          )
        )
      GROUP BY po.order_id, po.loan_id, la.application_number, la.status,
-              po.amount, po.payment_type, po.status
+              po.amount, po.payment_type, po.status, po.webhook_data
      ORDER BY last_webhook_at DESC`,
     dateParams
   );
+
+  const paidMissingTransaction = await filterUnresolvedGatewayGaps(executeQuery, paidMissingTransactionRaw);
+  const webhookSuccessNotApplied = await filterUnresolvedGatewayGaps(executeQuery, webhookSuccessNotAppliedRaw);
 
   const pendingExpiredCandidates = await executeQuery(
     `SELECT po.order_id, po.loan_id, la.application_number, la.status AS loan_status,
@@ -548,5 +598,7 @@ module.exports = {
   syncPaidGatewayOrder,
   extractPaymentReference,
   parseBankReferenceFromWebhookData,
-  orderHasGatewayTransaction
+  orderHasGatewayTransaction,
+  orderHasGatewayLedger,
+  getWebhookUtrForOrder
 };
