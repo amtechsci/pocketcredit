@@ -1740,9 +1740,9 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
         // If Cashfree shows payment is PAID, process it regardless of DB status
         // This handles cases where payment was successful but processing failed
         if (paymentReceived) {
-            // Update DB status if it's still PENDING
-            if (order.status === 'PENDING') {
-                console.log(`🔄 Updating order status from PENDING to PAID in database`);
+            // Update DB status when Cashfree confirms PAID (includes EXPIRED — webhook missed after retry)
+            if (order.status === 'PENDING' || order.status === 'EXPIRED') {
+                console.log(`🔄 Updating order status from ${order.status} to PAID in database`);
                 await executeQuery(
                     `UPDATE payment_orders SET status = 'PAID', updated_at = NOW() WHERE order_id = ?`,
                     [orderId]

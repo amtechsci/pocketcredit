@@ -260,5 +260,6 @@ module.exports = {
   ensureGatewayPaymentLedgerRecords,
   repairGatewayLedgerFromPaidOrders,
   extractPaymentReference,
-  parseBankReferenceFromWebhookData
+  parseBankReferenceFromWebhookData,
+  orderHasGatewayTransaction
 };
