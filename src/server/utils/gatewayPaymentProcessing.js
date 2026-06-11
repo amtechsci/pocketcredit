@@ -256,9 +256,282 @@ async function repairGatewayLedgerFromPaidOrders(executeQuery, {
   return summary;
 }
 
+/**
+ * Find gateway payment gaps (DB + optional webhook cross-check).
+ */
+async function findGatewayPaymentGaps(executeQuery, { sinceDate = null } = {}) {
+  const dateFilter = sinceDate ? ' AND po.created_at >= ?' : '';
+  const dateParams = sinceDate ? [sinceDate] : [];
+
+  const paidMissingTransaction = await executeQuery(
+    `SELECT po.order_id, po.loan_id, la.application_number, la.status AS loan_status,
+            po.amount, po.payment_type, po.status AS order_status, po.updated_at
+     FROM payment_orders po
+     JOIN loan_applications la ON la.id = po.loan_id
+     WHERE po.status = 'PAID'
+       AND po.order_id NOT LIKE 'ADMIN_%'
+       AND (po.recovery_link_id IS NULL OR po.recovery_link_id = 0)
+       AND (po.payment_type IS NULL OR po.payment_type != 'extension_fee')
+       AND po.loan_id IS NOT NULL
+       ${dateFilter}
+       AND NOT EXISTS (
+         SELECT 1 FROM transactions t
+         WHERE t.loan_application_id = po.loan_id
+           AND (
+             t.reference_number = po.order_id
+             OR t.description LIKE CONCAT('%Order: ', po.order_id, '%')
+           )
+       )
+     ORDER BY po.updated_at DESC`,
+    dateParams
+  );
+
+  const webhookSuccessNotApplied = await executeQuery(
+    `SELECT po.order_id, po.loan_id, la.application_number, la.status AS loan_status,
+            po.amount, po.payment_type, po.status AS order_status,
+            MAX(wl.created_at) AS last_webhook_at,
+            MAX(wl.id) AS last_webhook_id
+     FROM payment_orders po
+     JOIN loan_applications la ON la.id = po.loan_id
+     JOIN webhook_logs wl ON wl.client_ref_num = po.order_id
+       AND wl.webhook_type = 'payment_gateway'
+       AND wl.body_data LIKE '%"payment_status"%SUCCESS%'
+     WHERE po.order_id NOT LIKE 'ADMIN_%'
+       AND (po.recovery_link_id IS NULL OR po.recovery_link_id = 0)
+       AND (po.payment_type IS NULL OR po.payment_type != 'extension_fee')
+       ${dateFilter}
+       AND (
+         po.status != 'PAID'
+         OR NOT EXISTS (
+           SELECT 1 FROM transactions t
+           WHERE t.loan_application_id = po.loan_id
+             AND (
+               t.reference_number = po.order_id
+               OR t.description LIKE CONCAT('%Order: ', po.order_id, '%')
+             )
+         )
+       )
+     GROUP BY po.order_id, po.loan_id, la.application_number, la.status,
+              po.amount, po.payment_type, po.status
+     ORDER BY last_webhook_at DESC`,
+    dateParams
+  );
+
+  const pendingExpiredCandidates = await executeQuery(
+    `SELECT po.order_id, po.loan_id, la.application_number, la.status AS loan_status,
+            po.amount, po.payment_type, po.status AS order_status, po.created_at
+     FROM payment_orders po
+     JOIN loan_applications la ON la.id = po.loan_id
+     WHERE po.status IN ('PENDING', 'EXPIRED')
+       AND po.order_id NOT LIKE 'ADMIN_%'
+       AND (po.recovery_link_id IS NULL OR po.recovery_link_id = 0)
+       AND (po.payment_type IS NULL OR po.payment_type != 'extension_fee')
+       AND po.loan_id IS NOT NULL
+       ${dateFilter}
+     ORDER BY po.created_at DESC`,
+    dateParams
+  );
+
+  return {
+    paidMissingTransaction,
+    webhookSuccessNotApplied,
+    pendingExpiredCandidates
+  };
+}
+
+/**
+ * Verify PENDING/EXPIRED orders against Cashfree API (rate-limited).
+ */
+async function findCashfreePaidDbGapOrders(executeQuery, cashfreePayment, {
+  sinceDate = null,
+  delayMs = 150,
+  onProgress = null
+} = {}) {
+  const { pendingExpiredCandidates } = await findGatewayPaymentGaps(executeQuery, { sinceDate });
+  const gaps = [];
+  let checked = 0;
+
+  for (const order of pendingExpiredCandidates) {
+    checked += 1;
+    try {
+      const cf = await cashfreePayment.getOrderStatus(order.order_id);
+      const data = cf.data || {};
+      const cfStatus = cf.orderStatus || data.order_status || data.order?.order_status;
+      if (cfStatus === 'PAID') {
+        const payments = data.payments || data.payment || [];
+        const paymentData = Array.isArray(payments) && payments.length > 0
+          ? payments[0]
+          : (payments || data.payment || {});
+        const utr = extractPaymentReference(paymentData) || extractPaymentReference(data);
+        gaps.push({ ...order, cashfreeStatus: cfStatus, utr: utr || null });
+      }
+    } catch (err) {
+      gaps.push({ ...order, cashfreeStatus: 'ERROR', error: err.message });
+    }
+
+    if (onProgress) {
+      onProgress({ checked, total: pendingExpiredCandidates.length, orderId: order.order_id });
+    }
+    if (delayMs > 0 && checked < pendingExpiredCandidates.length) {
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+
+  return { checked: pendingExpiredCandidates.length, cashfreePaidDbGap: gaps.filter((g) => g.cashfreeStatus === 'PAID') };
+}
+
+/**
+ * Full sync: Cashfree PAID → payment_orders, transactions, EMI schedule, clearance.
+ */
+async function syncPaidGatewayOrder(executeQuery, orderId, {
+  dryRun = false,
+  bankReferenceOverride = null,
+  cashfreePayment = null
+} = {}) {
+  const cf = cashfreePayment || require('../services/cashfreePayment');
+
+  const [order] = await executeQuery(
+    `SELECT po.*, la.application_number, la.status AS loan_status
+     FROM payment_orders po
+     JOIN loan_applications la ON la.id = po.loan_id
+     WHERE po.order_id = ?`,
+    [orderId]
+  );
+
+  if (!order) {
+    return { success: false, reason: 'order_not_found', orderId };
+  }
+
+  const cashfreeStatus = await cf.getOrderStatus(orderId);
+  if (!cashfreeStatus.success) {
+    return { success: false, reason: 'cashfree_api_error', orderId, error: cashfreeStatus.error };
+  }
+
+  const data = cashfreeStatus.data || {};
+  const cfStatus = cashfreeStatus.orderStatus || data.order_status || data.order?.order_status;
+  if (cfStatus !== 'PAID') {
+    return { success: false, reason: 'not_paid_in_cashfree', orderId, cashfreeStatus: cfStatus };
+  }
+
+  const payments = data.payments || data.payment || [];
+  const paymentData = Array.isArray(payments) && payments.length > 0
+    ? payments[0]
+    : (payments || data.payment || {});
+  const bankReferenceNumber = bankReferenceOverride
+    || extractPaymentReference(paymentData)
+    || extractPaymentReference(data)
+    || parseBankReferenceFromWebhookData(
+      (await executeQuery(
+        `SELECT body_data FROM webhook_logs
+         WHERE webhook_type = 'payment_gateway' AND client_ref_num = ?
+         ORDER BY created_at DESC LIMIT 1`,
+        [orderId]
+      ))[0]?.body_data
+    );
+
+  if (dryRun) {
+    return {
+      success: true,
+      dryRun: true,
+      orderId,
+      loanId: order.loan_id,
+      dbStatus: order.status,
+      utr: bankReferenceNumber || null
+    };
+  }
+
+  await executeQuery(
+    `UPDATE payment_orders SET status = 'PAID', webhook_data = ?, updated_at = NOW() WHERE order_id = ?`,
+    [JSON.stringify({ synced_from: 'syncPaidGatewayOrder', cashfree: data }), orderId]
+  );
+
+  const ledger = await ensureGatewayPaymentLedgerRecords(executeQuery, {
+    loanId: order.loan_id,
+    userId: order.user_id,
+    orderId,
+    orderAmount: order.amount,
+    bankReferenceNumber,
+    paymentType: order.payment_type || 'loan_repayment',
+    applicationNumber: order.application_number
+  });
+
+  const result = {
+    success: true,
+    orderId,
+    loanId: order.loan_id,
+    ledger,
+    emiUpdated: false,
+    loanCleared: false
+  };
+
+  const paymentType = order.payment_type || 'loan_repayment';
+  const [loan] = await executeQuery(
+    `SELECT id, user_id, emi_schedule, total_repayable, status FROM loan_applications WHERE id = ?`,
+    [order.loan_id]
+  );
+
+  if (!loan || !['account_manager', 'overdue', 'default', 'delinquent'].includes(loan.status)) {
+    return result;
+  }
+
+  const {
+    markGatewayEmiPaidInSchedule,
+    evaluateLoanClearanceEligibility,
+    shouldClearLoanAfterPayment,
+    getEmiNumberFromPaymentType,
+    resolveClosedAmount
+  } = require('./loanClearance');
+
+  if (paymentType.startsWith('emi_')) {
+    const emiNum = getEmiNumberFromPaymentType(paymentType);
+    const markResult = markGatewayEmiPaidInSchedule(loan.emi_schedule, emiNum, order.amount);
+    if (markResult.updated) {
+      await executeQuery(
+        `UPDATE loan_applications SET emi_schedule = ? WHERE id = ?`,
+        [JSON.stringify(markResult.emiScheduleArray), order.loan_id]
+      );
+      result.emiUpdated = true;
+
+      if (shouldClearLoanAfterPayment(paymentType, markResult.emiScheduleArray)) {
+        const clearance = await evaluateLoanClearanceEligibility({
+          executeQuery,
+          loan: { ...loan, emi_schedule: markResult.emiScheduleArray },
+          emiSchedule: markResult.emiScheduleArray
+        });
+        if (clearance.shouldClear) {
+          const closedAmount = resolveClosedAmount(clearance, loan);
+          await executeQuery(
+            `UPDATE loan_applications
+             SET status = 'cleared', closed_date = CURDATE(), closed_amount = ?, updated_at = NOW()
+             WHERE id = ?`,
+            [closedAmount, order.loan_id]
+          );
+          result.loanCleared = true;
+          result.closedAmount = closedAmount;
+        }
+      }
+    }
+  } else if (paymentType === 'pre-close' || paymentType === 'full_payment') {
+    const closedAmount = parseFloat(loan.total_repayable) || parseFloat(order.amount) || 0;
+    await executeQuery(
+      `UPDATE loan_applications
+       SET status = 'cleared', closed_date = CURDATE(), closed_amount = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [closedAmount, order.loan_id]
+    );
+    result.loanCleared = true;
+    result.closedAmount = closedAmount;
+  }
+
+  return result;
+}
+
 module.exports = {
   ensureGatewayPaymentLedgerRecords,
   repairGatewayLedgerFromPaidOrders,
+  findGatewayPaymentGaps,
+  findCashfreePaidDbGapOrders,
+  syncPaidGatewayOrder,
   extractPaymentReference,
   parseBankReferenceFromWebhookData,
   orderHasGatewayTransaction
