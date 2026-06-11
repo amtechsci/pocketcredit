@@ -1,16 +1,18 @@
 /**
  * Audit gateway payments missing from transactions / not applied after webhook.
  *
- * Fast DB-only scan:
- *   node src/server/scripts/auditGatewayPaymentGaps.js
+ * Fast DB-only scan (start here):
  *   node src/server/scripts/auditGatewayPaymentGaps.js --since=2026-06-01
  *
- * Also verify PENDING/EXPIRED orders against Cashfree API (slower):
- *   node src/server/scripts/auditGatewayPaymentGaps.js --verify-cashfree --since=2026-06-01
+ * Verify high-signal gaps only (list A + B — fast, ~few API calls):
+ *   node src/server/scripts/auditGatewayPaymentGaps.js --since=2026-06-01 --verify-cashfree
  *
- * Fix all gaps found (dry-run first):
- *   node src/server/scripts/auditGatewayPaymentGaps.js --verify-cashfree --fix --dry-run
- *   node src/server/scripts/auditGatewayPaymentGaps.js --verify-cashfree --fix
+ * Verify ALL pending/expired orders (slow — hundreds of API calls):
+ *   node src/server/scripts/auditGatewayPaymentGaps.js --since=2026-06-01 --verify-cashfree --verify-all-pending
+ *
+ * Fix (dry-run first):
+ *   node src/server/scripts/auditGatewayPaymentGaps.js --since=2026-06-01 --verify-cashfree --fix --dry-run
+ *   node src/server/scripts/auditGatewayPaymentGaps.js --since=2026-06-01 --verify-cashfree --fix
  */
 
 const path = require('path');
@@ -47,11 +49,13 @@ const {
 function parseArgs(argv) {
   let since = null;
   let verifyCashfree = false;
+  let verifyAllPending = false;
   let fix = false;
   let dryRun = false;
 
   for (const arg of argv) {
     if (arg === '--verify-cashfree') verifyCashfree = true;
+    else if (arg === '--verify-all-pending') verifyAllPending = true;
     else if (arg === '--fix') fix = true;
     else if (arg === '--dry-run' || arg === '--dry_run') dryRun = true;
     else if (arg.startsWith('--since=')) since = arg.split('=').slice(1).join('=').trim();
@@ -65,7 +69,7 @@ function parseArgs(argv) {
     }
   }
 
-  return { since, verifyCashfree, fix, dryRun };
+  return { since, verifyCashfree, verifyAllPending, fix, dryRun };
 }
 
 function printOrderRows(label, rows) {
@@ -83,12 +87,20 @@ function printOrderRows(label, rows) {
   }
 }
 
+function dedupeOrdersByOrderId(rows) {
+  const map = new Map();
+  for (const r of rows) {
+    if (!map.has(r.order_id)) map.set(r.order_id, r);
+  }
+  return [...map.values()];
+}
+
 async function main() {
-  const { since, verifyCashfree, fix, dryRun } = parseArgs(process.argv.slice(2));
+  const { since, verifyCashfree, verifyAllPending, fix, dryRun } = parseArgs(process.argv.slice(2));
 
   console.log('Gateway payment gap audit');
   console.log('  Since:', since || '(all time)');
-  console.log('  Verify Cashfree:', verifyCashfree ? 'yes' : 'no (DB only)');
+  console.log('  Verify Cashfree:', verifyCashfree ? (verifyAllPending ? 'all pending/expired' : 'high-signal only (A+B)') : 'no (DB only)');
   console.log('  Fix:', fix ? (dryRun ? 'dry-run' : 'LIVE') : 'no (report only)');
   console.log('');
 
@@ -99,39 +111,46 @@ async function main() {
   printOrderRows('A) DB status PAID but no transaction row', gaps.paidMissingTransaction);
   printOrderRows('B) Webhook SUCCESS logged but not fully applied', gaps.webhookSuccessNotApplied);
   printOrderRows(
-    'C) PENDING/EXPIRED candidates (need Cashfree verify)',
-    gaps.pendingExpiredCandidates.slice(0, 50)
+    'C) PENDING/EXPIRED checkout sessions (mostly unpaid — not all are bugs)',
+    gaps.pendingExpiredCandidates.slice(0, 20)
   );
-  if (gaps.pendingExpiredCandidates.length > 50) {
-    console.log(`  ... and ${gaps.pendingExpiredCandidates.length - 50} more (use --verify-cashfree to check all)`);
+  if (gaps.pendingExpiredCandidates.length > 20) {
+    console.log(`  ... ${gaps.pendingExpiredCandidates.length} total abandoned/retry sessions since filter date`);
+    console.log('  (Only list B + Cashfree PAID matter for missing payments; ignore most of C)');
   }
 
   let cashfreeGaps = [];
   if (verifyCashfree) {
-    console.log('\nCalling Cashfree API for PENDING/EXPIRED orders (may take a few minutes)...');
+    const highSignal = dedupeOrdersByOrderId([
+      ...gaps.webhookSuccessNotApplied,
+      ...gaps.paidMissingTransaction.filter((r) => r.order_status !== 'PAID')
+    ]);
+    const toVerify = verifyAllPending ? gaps.pendingExpiredCandidates : highSignal;
+
+    console.log(`\nCalling Cashfree API for ${toVerify.length} order(s)...`);
     const cf = await findCashfreePaidDbGapOrders(executeQuery, cashfreePayment, {
-      sinceDate: since,
+      orderRows: toVerify,
       onProgress: ({ checked, total, orderId }) => {
-        if (checked % 25 === 0 || checked === total) {
+        if (checked === total || checked % 10 === 0) {
           console.log(`  Cashfree check: ${checked}/${total} — last ${orderId}`);
         }
       }
     });
     cashfreeGaps = cf.cashfreePaidDbGap;
-    printOrderRows('D) Cashfree PAID but DB still PENDING/EXPIRED (PLL6604 pattern)', cashfreeGaps);
+    printOrderRows('D) Cashfree PAID but DB not fully applied (fix these)', cashfreeGaps);
   }
 
   const summary = {
     paidMissingTransaction: gaps.paidMissingTransaction.length,
     webhookSuccessNotApplied: gaps.webhookSuccessNotApplied.length,
-    pendingExpiredCandidates: gaps.pendingExpiredCandidates.length,
+    pendingExpiredCheckoutSessions: gaps.pendingExpiredCandidates.length,
     cashfreePaidDbGap: cashfreeGaps.length
   };
   console.log('\n=== Summary ===');
   console.log(JSON.stringify(summary, null, 2));
 
   if (!fix) {
-    console.log('\nRun with --fix --dry-run after --verify-cashfree to preview repairs.');
+    console.log('\nNext: fix high-signal gaps with --verify-cashfree --fix --dry-run');
     return;
   }
 

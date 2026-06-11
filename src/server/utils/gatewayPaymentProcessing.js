@@ -69,9 +69,13 @@ async function ensureGatewayPaymentLedgerRecords(executeQuery, {
   const existingTx = await executeQuery(
     `SELECT id FROM transactions
      WHERE loan_application_id = ?
-       AND (reference_number = ? OR reference_number = ?)
+       AND (
+         reference_number = ?
+         OR reference_number = ?
+         OR description LIKE CONCAT('%', ?, '%')
+       )
      LIMIT 1`,
-    [loanId, ref, orderId]
+    [loanId, ref, orderId, orderId]
   );
 
   if (existingTx.length > 0) {
@@ -125,9 +129,13 @@ async function orderHasGatewayTransaction(executeQuery, loanId, orderId, bankRef
   const rows = await executeQuery(
     `SELECT id FROM transactions
      WHERE loan_application_id = ?
-       AND (reference_number = ? OR reference_number = ?)
+       AND (
+         reference_number = ?
+         OR reference_number = ?
+         OR description LIKE CONCAT('%', ?, '%')
+       )
      LIMIT 1`,
-    [loanId, ref, orderId]
+    [loanId, ref, orderId, orderId]
   );
   return rows.length > 0;
 }
@@ -279,7 +287,7 @@ async function findGatewayPaymentGaps(executeQuery, { sinceDate = null } = {}) {
          WHERE t.loan_application_id = po.loan_id
            AND (
              t.reference_number = po.order_id
-             OR t.description LIKE CONCAT('%Order: ', po.order_id, '%')
+             OR t.description LIKE CONCAT('%', po.order_id, '%')
            )
        )
      ORDER BY po.updated_at DESC`,
@@ -307,7 +315,7 @@ async function findGatewayPaymentGaps(executeQuery, { sinceDate = null } = {}) {
            WHERE t.loan_application_id = po.loan_id
              AND (
                t.reference_number = po.order_id
-               OR t.description LIKE CONCAT('%Order: ', po.order_id, '%')
+               OR t.description LIKE CONCAT('%', po.order_id, '%')
              )
          )
        )
@@ -340,18 +348,24 @@ async function findGatewayPaymentGaps(executeQuery, { sinceDate = null } = {}) {
 }
 
 /**
- * Verify PENDING/EXPIRED orders against Cashfree API (rate-limited).
+ * Verify specific orders (or all PENDING/EXPIRED) against Cashfree API.
  */
 async function findCashfreePaidDbGapOrders(executeQuery, cashfreePayment, {
   sinceDate = null,
+  orderRows = null,
   delayMs = 150,
   onProgress = null
 } = {}) {
-  const { pendingExpiredCandidates } = await findGatewayPaymentGaps(executeQuery, { sinceDate });
+  let candidates = orderRows;
+  if (!candidates) {
+    const { pendingExpiredCandidates } = await findGatewayPaymentGaps(executeQuery, { sinceDate });
+    candidates = pendingExpiredCandidates;
+  }
+
   const gaps = [];
   let checked = 0;
 
-  for (const order of pendingExpiredCandidates) {
+  for (const order of candidates) {
     checked += 1;
     try {
       const cf = await cashfreePayment.getOrderStatus(order.order_id);
@@ -370,14 +384,14 @@ async function findCashfreePaidDbGapOrders(executeQuery, cashfreePayment, {
     }
 
     if (onProgress) {
-      onProgress({ checked, total: pendingExpiredCandidates.length, orderId: order.order_id });
+      onProgress({ checked, total: candidates.length, orderId: order.order_id });
     }
-    if (delayMs > 0 && checked < pendingExpiredCandidates.length) {
+    if (delayMs > 0 && checked < candidates.length) {
       await new Promise((r) => setTimeout(r, delayMs));
     }
   }
 
-  return { checked: pendingExpiredCandidates.length, cashfreePaidDbGap: gaps.filter((g) => g.cashfreeStatus === 'PAID') };
+  return { checked: candidates.length, cashfreePaidDbGap: gaps.filter((g) => g.cashfreeStatus === 'PAID') };
 }
 
 /**
