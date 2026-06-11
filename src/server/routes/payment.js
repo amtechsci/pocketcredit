@@ -9,7 +9,8 @@ const { executeQuery } = require('../config/database');
 const cashfreePayment = require('../services/cashfreePayment');
 const { authenticateToken } = require('../middleware/auth');
 const { calculatePaymentAmount } = require('../utils/paymentAmount');
-const { shouldClearLoanAfterPayment, markAllEmisPaid, getEmiNumberFromPaymentType, markEmiPaidInSchedule, shouldSendEmiClearedSms, evaluateBackupLoanClearance, evaluateLoanClearanceEligibility, resolveClosedAmount } = require('../utils/loanClearance');
+const { ensureGatewayPaymentLedgerRecords } = require('../utils/gatewayPaymentProcessing');
+const { shouldClearLoanAfterPayment, markAllEmisPaid, getEmiNumberFromPaymentType, markGatewayEmiPaidInSchedule, shouldSendEmiClearedSms, evaluateBackupLoanClearance, evaluateLoanClearanceEligibility, resolveClosedAmount } = require('../utils/loanClearance');
 
 /**
  * Extract UTR/reference from payment object. Prefers actual UTR fields; avoids using
@@ -996,9 +997,9 @@ router.post('/create-order', authenticateToken, async (req, res) => {
 
 /**
  * POST /api/payment/webhook
- * Cashfree webhook for payment status
+ * Cashfree webhook for payment status (registered in server.js with raw body for signature verify)
  */
-router.post('/webhook', async (req, res) => {
+async function handlePaymentWebhook(req, res) {
     try {
         const signature = req.headers['x-webhook-signature'];
         
@@ -1079,10 +1080,18 @@ router.post('/webhook', async (req, res) => {
         }
 
         // Verify Cashfree webhook signature when secret is configured
+        const webhookTimestamp = req.headers['x-webhook-timestamp'];
+        const rawBody = req.rawBody
+          || (Buffer.isBuffer(req.body) ? req.body.toString('utf8') : null)
+          || JSON.stringify(payload);
+
         if (signature && cashfreePayment.clientSecret) {
-          const isValid = cashfreePayment.verifyWebhookSignature(signature, payload);
+          const isValid = cashfreePayment.verifyWebhookSignature(signature, webhookTimestamp, rawBody);
           if (!isValid) {
-            console.error('❌ Invalid payment webhook signature — request rejected');
+            console.error('❌ Invalid payment webhook signature — request rejected', {
+              hasTimestamp: Boolean(webhookTimestamp),
+              rawBodyLength: rawBody?.length
+            });
             return res.status(401).json({ message: 'Invalid signature' });
           }
         } else if (!signature) {
@@ -1335,90 +1344,32 @@ router.post('/webhook', async (req, res) => {
                     const paymentType = paymentOrder.payment_type || 'loan_repayment';
                     console.log(`💳 Processing ${paymentType} payment for loan: ${paymentOrder.loan_id}`);
                     
-                    // First check if loan is already cleared (by order-status check) - skip if so
-                    const loanStatusCheck = await executeQuery(
-                        `SELECT status FROM loan_applications WHERE id = ?`,
+                    const loanInfoRows = await executeQuery(
+                        `SELECT user_id, application_number, status FROM loan_applications WHERE id = ?`,
                         [paymentOrder.loan_id]
                     );
-                    
-                    if (loanStatusCheck.length > 0 && loanStatusCheck[0].status === 'cleared') {
-                        console.log(`ℹ️ Loan #${paymentOrder.loan_id} is already cleared (by order-status check), skipping webhook processing`);
-                        // Skip processing if already cleared, but continue to send webhook response
-                    } else {
-                        // Check if payment record already exists to avoid duplicates
-                        const existingPayment = await executeQuery(
-                            `SELECT id FROM loan_payments WHERE transaction_id = ? AND loan_id = ?`,
-                            [orderId, paymentOrder.loan_id]
-                        );
-                        
-                        if (existingPayment.length === 0) {
-                            // Create payment record
-                            await executeQuery(
-                                `INSERT INTO loan_payments (
-                                    loan_id, amount, payment_method, transaction_id, status, payment_date
-                                ) VALUES (?, ?, 'CASHFREE', ?, 'SUCCESS', NOW())`,
-                                [paymentOrder.loan_id, orderAmount, orderId]
-                            );
-                            console.log(`✅ Loan payment record created for loan: ${paymentOrder.loan_id}`);
-                            
-                            // Get loan details to determine transaction type and get user_id
-                            const loanInfo = await executeQuery(
-                                `SELECT user_id, application_number, plan_snapshot FROM loan_applications WHERE id = ?`,
-                                [paymentOrder.loan_id]
-                            );
-                            
-                            if (loanInfo.length > 0) {
-                                const applicationNumber = loanInfo[0].application_number;
-                                
-                                // Try to create transaction record (may fail due to ENUM constraints, but that's OK)
-                                try {
-                                    // Use valid ENUM values: 'emi_payment' for EMIs, 'credit' for full payments
-                                    let transactionType = 'emi_payment'; // Default for EMI payments
-                                    if (paymentType === 'pre-close' || paymentType === 'full_payment') {
-                                        transactionType = 'credit';
-                                    }
-                                    
-                                    // Get system admin ID for created_by (required foreign key to admins table)
-                                    const systemAdmins = await executeQuery(
-                                        'SELECT id FROM admins WHERE is_active = 1 AND role = ? ORDER BY created_at ASC LIMIT 1',
-                                        ['superadmin']
-                                    );
-                                    const systemAdminId = systemAdmins.length > 0 ? systemAdmins[0].id : null;
-                                    
-                                    if (!systemAdminId) {
-                                        // If no system admin found, skip transaction creation
-                                        console.warn('⚠️ No system admin found, skipping transaction record creation');
-                                    } else {
-                                        // Use 'other' for payment_method since 'cashfree' isn't in ENUM
-                                        await executeQuery(
-                                            `INSERT INTO transactions (
-                                                user_id, loan_application_id, transaction_type, amount, description,
-                                                category, payment_method, reference_number, transaction_date,
-                                                status, priority, created_by, created_at, updated_at
-                                            ) VALUES (?, ?, ?, ?, ?, 'loan', 'other', ?, CURDATE(), 'completed', 'high', ?, NOW(), NOW())`,
-                                            [
-                                                paymentOrder.user_id,
-                                                paymentOrder.loan_id,
-                                                transactionType,
-                                                orderAmount,
-                                                `${paymentType === 'pre-close' || paymentType === 'full_payment' ? 'Full Payment' : paymentType.replace('_', ' ').toUpperCase()} via Cashfree - Order: ${orderId}, App: ${applicationNumber}`,
-                                                bankReferenceNumber || orderId, // Use bank reference number if available, otherwise fallback to orderId
-                                                systemAdminId  // created_by = system admin for automated payments
-                                            ]
-                                        );
-                                        console.log(`✅ Transaction record created: ${transactionType}`);
-                                    }
-                                } catch (txnError) {
-                                    // Transaction creation failed (possibly due to created_by constraint)
-                                    // This is non-fatal - continue with loan clearance
-                                    console.warn(`⚠️ Could not create transaction record (non-fatal): ${txnError.message}`);
-                                }
-                            }
-                        } else {
-                            console.log(`ℹ️ Payment record already exists for order ${orderId}, skipping duplicate`);
-                        }
+                    const applicationNumber = loanInfoRows[0]?.application_number;
+                    const loanAlreadyCleared = loanInfoRows[0]?.status === 'cleared';
 
-                        // ALWAYS check if loan should be cleared (runs for all successful payments)
+                    const ledgerResult = await ensureGatewayPaymentLedgerRecords(executeQuery, {
+                        loanId: paymentOrder.loan_id,
+                        userId: paymentOrder.user_id,
+                        orderId,
+                        orderAmount,
+                        bankReferenceNumber,
+                        paymentType,
+                        applicationNumber
+                    });
+                    if (ledgerResult.transactionCreated) {
+                        console.log(`✅ Transaction record created for gateway order ${orderId}`);
+                    }
+                    if (ledgerResult.loanPaymentCreated) {
+                        console.log(`✅ Loan payment record created for loan: ${paymentOrder.loan_id}`);
+                    }
+
+                    if (loanAlreadyCleared) {
+                        console.log(`ℹ️ Loan #${paymentOrder.loan_id} already cleared — ledger synced, skipping clearance`);
+                    } else {
                     try {
                         // Get loan details to calculate outstanding balance
                             const loanDetails = await executeQuery(
@@ -1452,7 +1403,7 @@ router.post('/webhook', async (req, res) => {
                                     let emiScheduleArray = null;
 
                                     try {
-                                        const markResult = markEmiPaidInSchedule(
+                                        const markResult = markGatewayEmiPaidInSchedule(
                                             loan.emi_schedule,
                                             currentEmiNumber,
                                             paymentOrder.amount
@@ -1633,7 +1584,7 @@ router.post('/webhook', async (req, res) => {
         console.error('❌ Webhook processing error:', error);
         res.status(500).json({ message: 'Webhook processing failed' });
     }
-});
+}
 
 /**
  * GET /api/payment/pending
@@ -1840,79 +1791,34 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                         );
                         
                         if (loanStatusCheck.length > 0 && loanStatusCheck[0].status === 'cleared') {
-                            console.log(`ℹ️ Loan #${paymentOrder.loan_id} is already cleared (by webhook), skipping order-status processing`);
-                            // Still return the order data, just skip processing
-                        } else {
-                            // Check if payment record already exists to avoid duplicates
-                            const existingPayment = await executeQuery(
-                                `SELECT id FROM loan_payments WHERE transaction_id = ? AND loan_id = ?`,
-                                [orderId, paymentOrder.loan_id]
+                            console.log(`ℹ️ Loan #${paymentOrder.loan_id} already cleared — syncing ledger only`);
+                            const loanInfoRows = await executeQuery(
+                                `SELECT application_number FROM loan_applications WHERE id = ?`,
+                                [paymentOrder.loan_id]
                             );
-                            
-                            if (existingPayment.length === 0) {
-                                // Create payment record
-                                await executeQuery(
-                                    `INSERT INTO loan_payments (
-                                        loan_id, amount, payment_method, transaction_id, status, payment_date
-                                    ) VALUES (?, ?, 'CASHFREE', ?, 'SUCCESS', NOW())`,
-                                    [paymentOrder.loan_id, paymentOrder.amount, orderId]
-                                );
-                                console.log(`✅ Loan payment record created for loan: ${paymentOrder.loan_id}`);
-                                
-                                // Get loan details to determine transaction type and get user_id
-                                const loanInfo = await executeQuery(
-                                    `SELECT user_id, application_number, plan_snapshot FROM loan_applications WHERE id = ?`,
-                                    [paymentOrder.loan_id]
-                                );
-                                
-                                if (loanInfo.length > 0) {
-                                    const applicationNumber = loanInfo[0].application_number;
-                                    
-                                    // Try to create transaction record (may fail due to ENUM constraints, but that's OK)
-                                    try {
-                                        // Use valid ENUM values: 'emi_payment' for EMIs, 'credit' for full payments
-                                        let transactionType = 'emi_payment'; // Default for EMI payments
-                                        if (paymentType === 'pre-close' || paymentType === 'full_payment') {
-                                            transactionType = 'credit';
-                                        }
-                                        
-                                        // Get system admin ID for created_by (required foreign key to admins table)
-                                        const systemAdmins = await executeQuery(
-                                            'SELECT id FROM admins WHERE is_active = 1 AND role = ? ORDER BY created_at ASC LIMIT 1',
-                                            ['superadmin']
-                                        );
-                                        const systemAdminId = systemAdmins.length > 0 ? systemAdmins[0].id : null;
-                                        
-                                        if (!systemAdminId) {
-                                            // If no system admin found, skip transaction creation
-                                            console.warn('⚠️ No system admin found, skipping transaction record creation');
-                                        } else {
-                                            // Use 'other' for payment_method since 'cashfree' isn't in ENUM
-                                            await executeQuery(
-                                                `INSERT INTO transactions (
-                                                    user_id, loan_application_id, transaction_type, amount, description,
-                                                    category, payment_method, reference_number, transaction_date,
-                                                    status, priority, created_by, created_at, updated_at
-                                                ) VALUES (?, ?, ?, ?, ?, 'loan', 'other', ?, CURDATE(), 'completed', 'high', ?, NOW(), NOW())`,
-                                                [
-                                                    paymentOrder.user_id,
-                                                    paymentOrder.loan_id,
-                                                    transactionType,
-                                                    paymentOrder.amount,
-                                                    `${paymentType === 'pre-close' || paymentType === 'full_payment' ? 'Full Payment' : paymentType.replace('_', ' ').toUpperCase()} via Cashfree - Order: ${orderId}, App: ${applicationNumber}`,
-                                                    bankReferenceNumber || orderId, // Use bank reference number from API if available, otherwise fallback to orderId
-                                                    systemAdminId  // created_by = system admin for automated payments
-                                                ]
-                                            );
-                                            console.log(`✅ Transaction record created: ${transactionType}`);
-                                        }
-                                    } catch (txnError) {
-                                        console.warn(`⚠️ Could not create transaction record (non-fatal): ${txnError.message}`);
-                                    }
-                                }
-                            } else {
-                                console.log(`ℹ️ Payment record already exists for order ${orderId}, skipping duplicate`);
-                            }
+                            await ensureGatewayPaymentLedgerRecords(executeQuery, {
+                                loanId: paymentOrder.loan_id,
+                                userId: paymentOrder.user_id,
+                                orderId,
+                                orderAmount: paymentOrder.amount,
+                                bankReferenceNumber,
+                                paymentType,
+                                applicationNumber: loanInfoRows[0]?.application_number
+                            });
+                        } else {
+                            const loanInfoRows = await executeQuery(
+                                `SELECT application_number FROM loan_applications WHERE id = ?`,
+                                [paymentOrder.loan_id]
+                            );
+                            await ensureGatewayPaymentLedgerRecords(executeQuery, {
+                                loanId: paymentOrder.loan_id,
+                                userId: paymentOrder.user_id,
+                                orderId,
+                                orderAmount: paymentOrder.amount,
+                                bankReferenceNumber,
+                                paymentType,
+                                applicationNumber: loanInfoRows[0]?.application_number
+                            });
 
                             // ALWAYS check if loan should be cleared (runs for all successful payments)
                             try {
@@ -1946,7 +1852,7 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
                                                 let emiScheduleArray = null;
 
                                                 try {
-                                                    const markResult = markEmiPaidInSchedule(
+                                                    const markResult = markGatewayEmiPaidInSchedule(
                                                         loan.emi_schedule,
                                                         currentEmiNumber,
                                                         paymentOrder.amount
@@ -2187,3 +2093,4 @@ router.get('/order-status/:orderId', authenticateToken, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.webhookHandler = handlePaymentWebhook;

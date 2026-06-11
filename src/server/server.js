@@ -218,7 +218,25 @@ app.options('*', (req, res) => {
   res.sendStatus(200);
 });
 
-// Body parsing middleware - Increased limits for file uploads
+// Body parsing — Cashfree payment webhook needs raw body for signature verification (before JSON parser)
+const paymentRoutes = require('./routes/payment');
+app.post(
+  '/api/payment/webhook',
+  express.raw({ type: 'application/json' }),
+  (req, res, next) => {
+    if (Buffer.isBuffer(req.body)) {
+      req.rawBody = req.body.toString('utf8');
+      try {
+        req.body = JSON.parse(req.rawBody);
+      } catch {
+        req.body = {};
+      }
+    }
+    next();
+  },
+  paymentRoutes.webhookHandler
+);
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -329,8 +347,7 @@ const clickWrapWebhookRoutes = require('./routes/clickWrapWebhooks');
 app.use('/api/clickwrap', clickWrapRoutes);
 app.use('/api/clickwrap', clickWrapWebhookRoutes);  // Webhooks on /api/clickwrap/webhook
 
-// Payment Gateway routes (One-time payments)
-const paymentRoutes = require('./routes/payment');
+// Payment Gateway routes (One-time payments) — webhook registered above with raw body
 app.use('/api/payment', paymentRoutes);
 
 // Public recovery payment links (slug-based; no JWT)

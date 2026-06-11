@@ -3803,7 +3803,7 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
             });
 
             if (clearance.shouldClear) {
-              const closedAmount = clearance.amountDue || parseFloat(loan.total_repayable) || 0;
+              const closedAmount = clearance.amountDue || clearance.closedAmount || parseFloat(loan.total_repayable) || 0;
               const closedDate = txDate;
               await executeQuery(
                 `UPDATE loan_applications 
@@ -3838,6 +3838,11 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
 
               loanStatusUpdated = true;
               newStatus = 'cleared';
+            } else if (paidEmis === totalEmis && totalEmis > 0) {
+              console.warn(
+                `⚠️ Loan #${loanIdInt} all EMIs paid but auto-clear skipped: ${clearance.reason || 'unknown'}`,
+                { totalPaid: clearance.totalPaid, amountDue: clearance.amountDue }
+              );
             } else if (markResult.emiFullyPaid) {
               try {
                 const { triggerEventSMS } = require('../utils/eventSmsTrigger');

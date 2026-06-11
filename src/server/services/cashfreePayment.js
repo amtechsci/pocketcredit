@@ -220,24 +220,42 @@ class CashfreePaymentService {
     }
 
     /**
-     * Verify webhook signature
-     * @param {string} signature - Webhook signature from header
-     * @param {Object} payload - Webhook payload
-     * @returns {boolean} - Verification result
+     * Verify Cashfree PG webhook signature.
+     * @param {string} signature - x-webhook-signature header
+     * @param {string} timestamp - x-webhook-timestamp header (required for PG webhooks)
+     * @param {string} rawBody - exact raw request body string
      */
-    verifyWebhookSignature(signature, payload) {
+    verifyWebhookSignature(signature, timestamp, rawBody) {
+        if (!signature || !this.clientSecret) {
+            return !signature;
+        }
+
         const crypto = require('crypto');
 
-        // Cashfree uses timestamp-based signature
-        const timestamp = payload.data?.order?.order_meta?.timestamp || Date.now();
-        const rawBody = JSON.stringify(payload);
+        if (timestamp != null && rawBody != null) {
+            const signStr = String(timestamp) + String(rawBody);
+            const computed = crypto
+                .createHmac('sha256', this.clientSecret)
+                .update(signStr)
+                .digest('base64');
+            if (computed === signature) {
+                return true;
+            }
+        }
 
-        const computedSignature = crypto
-            .createHmac('sha256', this.clientSecret)
-            .update(timestamp + rawBody)
-            .digest('base64');
+        // Legacy fallback (older integrations / misconfigured headers)
+        if (typeof timestamp === 'object' && timestamp !== null) {
+            const payload = timestamp;
+            const legacyTs = payload.data?.order?.order_meta?.timestamp || Date.now();
+            const legacyBody = JSON.stringify(payload);
+            const legacySig = crypto
+                .createHmac('sha256', this.clientSecret)
+                .update(legacyTs + legacyBody)
+                .digest('base64');
+            return legacySig === signature;
+        }
 
-        return computedSignature === signature;
+        return false;
     }
 
     /**

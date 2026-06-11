@@ -655,6 +655,13 @@ async function backfillAdminRepaymentRecords(executeQuery, {
     }
   }
 
+  const { repairPendingLoanClearance } = require('./loanClearance');
+  summary.pendingClearanceRepair = await repairPendingLoanClearance(executeQuery, {
+    loanId,
+    loanIds: scopedIds,
+    dryRun
+  });
+
   return summary;
 }
 

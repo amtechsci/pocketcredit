@@ -6,6 +6,10 @@
  *   node src/server/scripts/backfillAdminRepayments.js --dry-run
  *   node src/server/scripts/backfillAdminRepayments.js
  *
+ * Repair missing Cashfree transaction rows (paid order but no transactions entry):
+ *   node src/server/scripts/backfillAdminRepayments.js --repair-gateway-ledger-only --dry-run
+ *   node src/server/scripts/backfillAdminRepayments.js --repair-gateway-ledger-only
+ *
  * Optional scope (only for testing a few loans):
  *   node src/server/scripts/backfillAdminRepayments.js --loan-id=4769
  *   node src/server/scripts/backfillAdminRepayments.js --loan-ids=4769,2739
@@ -40,6 +44,8 @@ const loadedEnvPath = loadEnv();
 
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { backfillAdminRepaymentRecords, countBackfillScope } = require('../utils/adminRepaymentSync');
+const { repairPendingLoanClearance } = require('../utils/loanClearance');
+const { repairGatewayLedgerFromPaidOrders } = require('../utils/gatewayPaymentProcessing');
 
 function parseLoanIdsFromFile(filePath) {
   const resolved = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
@@ -59,10 +65,16 @@ function parseArgs(argv) {
   let dryRun = false;
   let loanId = null;
   let loanIds = null;
+  let repairClearanceOnly = false;
+  let repairGatewayLedgerOnly = false;
 
   for (const arg of argv) {
     if (arg === '--dry-run' || arg === '--dry_run') {
       dryRun = true;
+    } else if (arg === '--repair-clearance-only') {
+      repairClearanceOnly = true;
+    } else if (arg === '--repair-gateway-ledger-only') {
+      repairGatewayLedgerOnly = true;
     } else if (arg.startsWith('--loan-id=')) {
       loanId = parseInt(arg.split('=')[1], 10);
     } else if (arg.startsWith('--loan_id=')) {
@@ -78,11 +90,11 @@ function parseArgs(argv) {
     }
   }
 
-  return { dryRun, loanId, loanIds };
+  return { dryRun, loanId, loanIds, repairClearanceOnly, repairGatewayLedgerOnly };
 }
 
 async function main() {
-  const { dryRun, loanId, loanIds } = parseArgs(process.argv.slice(2));
+  const { dryRun, loanId, loanIds, repairClearanceOnly, repairGatewayLedgerOnly } = parseArgs(process.argv.slice(2));
   const scopeOpts = {
     loanId: loanIds?.length ? null : loanId,
     loanIds: loanIds?.length ? loanIds : null
@@ -104,10 +116,41 @@ async function main() {
   } else {
     console.log('Scope: ALL loans with admin repayment transactions (no loan ID list needed)');
   }
-  console.log('Script version: adminRepaymentSync v7 (rebuild emi_schedule from admin txs)');
+  console.log('Script version: adminRepaymentSync v9 (gateway ledger repair + auto-clear)');
   console.log('');
 
   await initializeDatabase();
+
+  if (repairGatewayLedgerOnly) {
+    console.log('Running gateway ledger repair for PAID Cashfree orders missing transactions...');
+    const repair = await repairGatewayLedgerFromPaidOrders(executeQuery, {
+      loanId: loanIds?.length ? null : loanId,
+      loanIds: loanIds?.length ? loanIds : null,
+      dryRun,
+      onProgress: ({ processed, total, loanId: lid, orderId, action }) => {
+        if (processed === total || processed % 25 === 0) {
+          console.log(`  Progress: ${processed}/${total} — PLL${lid} order ${orderId} (${action})`);
+        }
+      }
+    });
+    console.log('Gateway ledger repair summary:');
+    console.log(JSON.stringify(repair, null, 2));
+    if (repair.errors?.length) process.exitCode = 1;
+    return;
+  }
+
+  if (repairClearanceOnly) {
+    console.log('Running pending loan clearance repair only...');
+    const repair = await repairPendingLoanClearance(executeQuery, {
+      loanId: loanIds?.length ? null : loanId,
+      loanIds: loanIds?.length ? loanIds : null,
+      dryRun
+    });
+    console.log('Clearance repair summary:');
+    console.log(JSON.stringify(repair, null, 2));
+    if (repair.errors?.length) process.exitCode = 1;
+    return;
+  }
 
   const scope = await countBackfillScope(executeQuery, scopeOpts);
   console.log('Preflight:');
@@ -141,6 +184,11 @@ async function main() {
   console.log(`Completed in ${elapsedSec}s`);
   console.log('Backfill summary:');
   console.log(JSON.stringify(summary, null, 2));
+
+  if (summary.pendingClearanceRepair?.cleared > 0) {
+    console.log('');
+    console.log(`Auto-cleared ${summary.pendingClearanceRepair.cleared} loan(s) that had all EMIs paid but were still active.`);
+  }
 
   if (dryRun && summary.spuriousEmisReverted > 0) {
     console.log('');

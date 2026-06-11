@@ -175,6 +175,34 @@ function markEmiPaidInSchedule(emiScheduleRaw, emiNumber, paymentAmount, paidDat
   return { updated: true, emiScheduleArray: schedule, emiFullyPaid };
 }
 
+/** Gateway / successful Cashfree EMI — order amount is authoritative (incl. penalty). */
+function markGatewayEmiPaidInSchedule(emiScheduleRaw, emiNumber, paymentAmount, paidDate) {
+  const schedule = parseEmiSchedule(emiScheduleRaw);
+  if (!schedule || emiNumber == null || emiNumber < 1 || schedule.length < emiNumber) {
+    return { updated: false, emiScheduleArray: schedule, emiFullyPaid: false };
+  }
+
+  const idx = emiNumber - 1;
+  const emi = schedule[idx] || {};
+  const date = paidDate || new Date().toISOString().split('T')[0];
+  const paid = parseFloat(paymentAmount) || 0;
+
+  let baseInstalment = emi.instalment_amount;
+  if (baseInstalment == null || baseInstalment === '') {
+    baseInstalment = parseFloat(emi.emi_amount || 0) || paid;
+  }
+
+  schedule[idx] = {
+    ...emi,
+    status: 'paid',
+    paid_date: date,
+    paid_amount: paid,
+    instalment_amount: parseFloat(baseInstalment) || paid
+  };
+
+  return { updated: true, emiScheduleArray: schedule, emiFullyPaid: true };
+}
+
 /** Only notify customer when schedule was persisted, this EMI is fully paid, and loan is not fully cleared yet. */
 function shouldSendEmiClearedSms(emiScheduleUpdated, shouldClearLoan, emiFullyPaid = false) {
   return emiScheduleUpdated === true && emiFullyPaid === true && shouldClearLoan !== true;
@@ -237,7 +265,9 @@ async function getLoanAmountDueForClearance(loanId, loanFallback) {
 }
 
 /**
- * Decide if loan should be cleared after repayments (eNACH / admin EMI path).
+ * Decide if loan should be cleared after repayments (eNACH / admin EMI / gateway EMI path).
+ * When every EMI is fully paid on the schedule, the loan is complete — do not block clearance
+ * because ledger totals lag penalty-inclusive calc by a few rupees (common with admin entries).
  */
 async function evaluateLoanClearanceEligibility({ executeQuery, loan, emiSchedule }) {
   if (!loan || !ACTIVE_REPAYMENT_STATUSES.includes(loan.status)) {
@@ -250,17 +280,120 @@ async function evaluateLoanClearanceEligibility({ executeQuery, loan, emiSchedul
 
   const totalPaid = await getTotalRepaymentsReceived(executeQuery, loan.id);
   const amountDue = await getLoanAmountDueForClearance(loan.id, loan);
-
-  if (totalPaid >= amountDue - AMOUNT_TOLERANCE) {
-    return { shouldClear: true, totalPaid, amountDue, closedAmount: amountDue };
-  }
+  const schedule = parseEmiSchedule(emiSchedule) || [];
+  const schedulePaidTotal = schedule.reduce((sum, emi) => sum + getEmiPaidAmount(emi), 0);
+  const effectivePaid = Math.round(Math.max(totalPaid, schedulePaidTotal) * 100) / 100;
 
   return {
-    shouldClear: false,
-    reason: 'total_paid_below_amount_due',
-    totalPaid,
-    amountDue
+    shouldClear: true,
+    totalPaid: effectivePaid,
+    amountDue,
+    closedAmount: amountDue,
+    reason: 'all_emis_fully_paid'
   };
+}
+
+/**
+ * Find active EMI loans whose schedule shows all EMIs paid but status was never cleared
+ * (e.g. auto-clear blocked by old amount-due check). Optionally scope to specific loan IDs.
+ */
+async function repairPendingLoanClearance(executeQuery, {
+  loanId = null,
+  loanIds = null,
+  dryRun = false,
+  onProgress = null
+} = {}) {
+  const scopedIds = Array.isArray(loanIds) && loanIds.length > 0
+    ? loanIds.map((id) => parseInt(id, 10)).filter((id) => Number.isFinite(id) && id > 0)
+    : (loanId != null ? [parseInt(loanId, 10)] : null);
+
+  let sql = `
+    SELECT id, user_id, status, emi_schedule, total_repayable, application_number
+    FROM loan_applications
+    WHERE status IN ('account_manager', 'overdue', 'default', 'delinquent')
+      AND emi_schedule IS NOT NULL
+      AND emi_schedule != ''
+      AND emi_schedule != '[]'
+  `;
+  const params = [];
+  if (scopedIds && scopedIds.length > 0) {
+    sql += ` AND id IN (${scopedIds.map(() => '?').join(', ')})`;
+    params.push(...scopedIds);
+  }
+  sql += ' ORDER BY id ASC';
+
+  const rows = await executeQuery(sql, params);
+  const summary = {
+    scanned: rows.length,
+    eligible: 0,
+    cleared: 0,
+    errors: []
+  };
+
+  let processed = 0;
+  for (const loan of rows) {
+    processed += 1;
+    try {
+      if (!areAllEmisPaid(loan.emi_schedule)) {
+        continue;
+      }
+
+      summary.eligible += 1;
+      const clearance = await evaluateLoanClearanceEligibility({
+        executeQuery,
+        loan,
+        emiSchedule: loan.emi_schedule
+      });
+
+      if (!clearance.shouldClear) {
+        continue;
+      }
+
+      const closedAmount = resolveClosedAmount(clearance, loan);
+      const closedDate = new Date().toISOString().split('T')[0];
+
+      if (!dryRun) {
+        await executeQuery(
+          `UPDATE loan_applications
+           SET status = 'cleared', closed_date = ?, closed_amount = ?, updated_at = NOW()
+           WHERE id = ?`,
+          [closedDate, closedAmount, loan.id]
+        );
+
+        try {
+          const { triggerEventSMS } = require('./eventSmsTrigger');
+          await triggerEventSMS('loan_cleared', {
+            userId: loan.user_id,
+            loanId: loan.id
+          });
+        } catch (smsErr) {
+          console.warn(`[repairPendingLoanClearance] loan_cleared SMS skipped PLL${loan.id}: ${smsErr.message}`);
+        }
+
+        try {
+          const { runCoolingPeriodCheckAfterLoanClear } = require('./creditLimitCalculator');
+          await runCoolingPeriodCheckAfterLoanClear(loan.user_id, loan.id);
+        } catch (coolErr) {
+          console.warn(`[repairPendingLoanClearance] cooling period skipped PLL${loan.id}: ${coolErr.message}`);
+        }
+      }
+
+      summary.cleared += 1;
+    } catch (err) {
+      summary.errors.push({ loan_id: loan.id, message: err.message });
+    }
+
+    if (typeof onProgress === 'function') {
+      onProgress({
+        processed,
+        total: rows.length,
+        loanId: loan.id,
+        pct: rows.length > 0 ? Math.round((processed / rows.length) * 100) : 100
+      });
+    }
+  }
+
+  return summary;
 }
 
 /** Prefer closedAmount, then amountDue (repayable + penalties), then loan.total_repayable. */
@@ -372,11 +505,14 @@ module.exports = {
   markAllEmisPaid,
   getEmiNumberFromPaymentType,
   markEmiPaidInSchedule,
+  markGatewayEmiPaidInSchedule,
   shouldSendEmiClearedSms,
   getTotalSuccessfulLoanPayments,
   getTotalRepaymentsReceived,
   getLoanAmountDueForClearance,
   evaluateLoanClearanceEligibility,
+  repairPendingLoanClearance,
   resolveClosedAmount,
-  recordEnachLedgerTransaction
+  recordEnachLedgerTransaction,
+  getSystemAdminId
 };
