@@ -87,6 +87,17 @@ async function getGatewayPaidEmiNumbers(executeQuery, loanId) {
   return nums;
 }
 
+function isEmiMarkedPaid(emi) {
+  const s = String(emi?.status || '').toLowerCase();
+  return s === 'paid' || s === 'completed';
+}
+
+function countPaidEmisInSchedule(scheduleRaw) {
+  const schedule = parseEmiSchedule(scheduleRaw);
+  if (!schedule) return 0;
+  return schedule.filter(isEmiMarkedPaid).length;
+}
+
 function revertSpuriousPaidEmis(schedule, allowedPaidEmiNumbers) {
   const allowed =
     allowedPaidEmiNumbers instanceof Set
@@ -95,7 +106,7 @@ function revertSpuriousPaidEmis(schedule, allowedPaidEmiNumbers) {
   let updated = false;
   const next = schedule.map((emi, idx) => {
     const num = idx + 1;
-    if (String(emi?.status || '').toLowerCase() !== 'paid') return emi;
+    if (!isEmiMarkedPaid(emi)) return emi;
     if (allowed.has(num)) return emi;
     updated = true;
     return {
@@ -106,6 +117,61 @@ function revertSpuriousPaidEmis(schedule, allowedPaidEmiNumbers) {
     };
   });
   return { updated, emiScheduleArray: next };
+}
+
+/**
+ * Rebuild emi_schedule paid flags from admin EMI transactions (sequential) + gateway-paid EMIs.
+ * Clears all other paid flags first so double-mark bugs are fully corrected.
+ */
+function rebuildEmiScheduleFromAdminEmiPayments(originalScheduleRaw, adminEmiTxs, gatewayPaidNums) {
+  const original = parseEmiSchedule(originalScheduleRaw);
+  if (!original || original.length === 0) {
+    return { updated: false, emiScheduleArray: original, origPaidCount: 0, newPaidCount: 0 };
+  }
+
+  const gateway =
+    gatewayPaidNums instanceof Set ? gatewayPaidNums : new Set(gatewayPaidNums || []);
+  const origPaidCount = countPaidEmisInSchedule(original);
+
+  let schedule = original.map((emi, idx) => {
+    const num = idx + 1;
+    if (gateway.has(num) && isEmiMarkedPaid(emi)) {
+      return { ...emi };
+    }
+    return {
+      ...emi,
+      status: 'pending',
+      paid_date: null,
+      paid_amount: null
+    };
+  });
+
+  const sortedEmiTxs = [...(adminEmiTxs || [])].sort((a, b) => {
+    const da = normalizeDateOnly(a.transaction_date);
+    const db = normalizeDateOnly(b.transaction_date);
+    if (da !== db) return da.localeCompare(db);
+    return (parseInt(a.id, 10) || 0) - (parseInt(b.id, 10) || 0);
+  });
+
+  for (let i = 0; i < sortedEmiTxs.length; i++) {
+    const tx = sortedEmiTxs[i];
+    const emiNum = i + 1;
+    if (emiNum > schedule.length) break;
+    const markResult = markAdminEmiPaidInSchedule(
+      schedule,
+      emiNum,
+      tx.amount,
+      tx.transaction_date
+    );
+    if (markResult.emiScheduleArray) {
+      schedule = markResult.emiScheduleArray;
+    }
+  }
+
+  const newPaidCount = countPaidEmisInSchedule(schedule);
+  const updated = JSON.stringify(original) !== JSON.stringify(schedule);
+
+  return { updated, emiScheduleArray: schedule, origPaidCount, newPaidCount };
 }
 
 function resolvePaymentTypeForAdminTransaction(txType, emiNumber) {
@@ -508,24 +574,26 @@ async function backfillAdminRepaymentRecords(executeQuery, {
 
   for (const [lid, txs] of byLoan) {
     processedLoans += 1;
-    let currentSchedule = txs[0]?.emi_schedule || null;
-    const adminTargetEmiNumbers = new Set();
+    const originalSchedule = txs[0]?.emi_schedule || null;
+    const adminEmiTxs = txs.filter(
+      (tx) => String(tx.transaction_type || '').toLowerCase() === 'emi_payment'
+    );
     let emiPaymentSeq = 0;
 
+    // 1) Sync payment_orders / loan_payments only (schedule rebuilt in step 2)
     for (const tx of txs) {
       try {
         let emiNumberOverride = null;
         if (String(tx.transaction_type || '').toLowerCase() === 'emi_payment') {
           emiPaymentSeq += 1;
           emiNumberOverride = emiPaymentSeq;
-          adminTargetEmiNumbers.add(emiPaymentSeq);
         }
 
         const loan = {
           id: lid,
           user_id: tx.loan_user_id || tx.user_id,
           application_number: tx.application_number,
-          emi_schedule: currentSchedule,
+          emi_schedule: originalSchedule,
           status: tx.loan_status
         };
 
@@ -534,16 +602,10 @@ async function backfillAdminRepaymentRecords(executeQuery, {
           loan,
           dryRun,
           emiNumber: emiNumberOverride,
-          forceEmiScheduleUpdate: true
+          skipEmiScheduleUpdate: true
         });
 
         if (result.changed) summary.synced += 1;
-        if (result.emiScheduleUpdated) {
-          summary.emiSchedulesFixed += 1;
-          currentSchedule = result.emiScheduleArray;
-        } else if (result.emiScheduleArray) {
-          currentSchedule = result.emiScheduleArray;
-        }
       } catch (err) {
         summary.errors.push({
           transaction_id: tx.id,
@@ -553,29 +615,32 @@ async function backfillAdminRepaymentRecords(executeQuery, {
       }
     }
 
-    if (adminTargetEmiNumbers.size > 0) {
+    // 2) Rebuild emi_schedule from admin EMI txs (sequential) + gateway-paid EMIs
+    if (adminEmiTxs.length > 0) {
       try {
-        const schedule = parseEmiSchedule(currentSchedule);
-        if (schedule && schedule.length > 0) {
-          const gatewayPaid = await getGatewayPaidEmiNumbers(executeQuery, lid);
-          const allowed = new Set([...adminTargetEmiNumbers, ...gatewayPaid]);
-          const revert = revertSpuriousPaidEmis(schedule, allowed);
-          if (revert.updated) {
-            currentSchedule = revert.emiScheduleArray;
-            if (!dryRun) {
-              await executeQuery(
-                `UPDATE loan_applications SET emi_schedule = ?, updated_at = NOW() WHERE id = ?`,
-                [JSON.stringify(currentSchedule), lid]
-              );
-              summary.emiSchedulesFixed += 1;
-            }
+        const gatewayPaid = await getGatewayPaidEmiNumbers(executeQuery, lid);
+        const rebuild = rebuildEmiScheduleFromAdminEmiPayments(
+          originalSchedule,
+          adminEmiTxs,
+          gatewayPaid
+        );
+
+        if (rebuild.updated) {
+          if (rebuild.origPaidCount > rebuild.newPaidCount) {
             summary.spuriousEmisReverted += 1;
+          }
+          summary.emiSchedulesFixed += 1;
+          if (!dryRun) {
+            await executeQuery(
+              `UPDATE loan_applications SET emi_schedule = ?, updated_at = NOW() WHERE id = ?`,
+              [JSON.stringify(rebuild.emiScheduleArray), lid]
+            );
           }
         }
       } catch (err) {
         summary.errors.push({
           loan_id: lid,
-          message: `EMI reconcile failed: ${err.message}`
+          message: `EMI schedule rebuild failed: ${err.message}`
         });
       }
     }
@@ -598,6 +663,7 @@ module.exports = {
   normalizeDateOnly,
   getFirstUnpaidEmiNumber,
   markAdminEmiPaidInSchedule,
+  rebuildEmiScheduleFromAdminEmiPayments,
   resolvePaymentTypeForAdminTransaction,
   syncAdminRepaymentTransaction,
   countBackfillScope,

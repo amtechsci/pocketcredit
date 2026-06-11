@@ -104,7 +104,7 @@ async function main() {
   } else {
     console.log('Scope: ALL loans with admin repayment transactions (no loan ID list needed)');
   }
-  console.log('Script version: adminRepaymentSync v6 (sequential EMI + spurious revert)');
+  console.log('Script version: adminRepaymentSync v7 (rebuild emi_schedule from admin txs)');
   console.log('');
 
   await initializeDatabase();
