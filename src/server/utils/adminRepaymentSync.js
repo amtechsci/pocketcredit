@@ -427,10 +427,39 @@ async function syncAdminRepaymentTransaction(executeQuery, {
   };
 }
 
+async function countBackfillScope(executeQuery, { loanId = null, loanIds = null } = {}) {
+  const scopedIds = Array.isArray(loanIds) && loanIds.length > 0
+    ? loanIds.map((id) => parseInt(id, 10)).filter((id) => Number.isFinite(id) && id > 0)
+    : (loanId != null ? [parseInt(loanId, 10)] : null);
+
+  let sql = `
+    SELECT
+      COUNT(DISTINCT t.loan_application_id) AS loan_count,
+      COUNT(*) AS transaction_count,
+      SUM(CASE WHEN t.transaction_type = 'emi_payment' THEN 1 ELSE 0 END) AS emi_payment_count
+    FROM transactions t
+    WHERE t.transaction_type IN ('emi_payment', 'full_payment', 'settlement', 'part_payment')
+      AND t.status = 'completed'
+      AND t.loan_application_id IS NOT NULL
+  `;
+  const params = [];
+  if (scopedIds && scopedIds.length > 0) {
+    sql += ` AND t.loan_application_id IN (${scopedIds.map(() => '?').join(', ')})`;
+    params.push(...scopedIds);
+  }
+  const rows = await executeQuery(sql, params);
+  return {
+    loanCount: parseInt(rows[0]?.loan_count, 10) || 0,
+    transactionCount: parseInt(rows[0]?.transaction_count, 10) || 0,
+    emiPaymentCount: parseInt(rows[0]?.emi_payment_count, 10) || 0
+  };
+}
+
 async function backfillAdminRepaymentRecords(executeQuery, {
   loanId = null,
   loanIds = null,
-  dryRun = false
+  dryRun = false,
+  onProgress = null
 } = {}) {
   let sql = `
     SELECT
@@ -474,7 +503,11 @@ async function backfillAdminRepaymentRecords(executeQuery, {
     errors: []
   };
 
+  let processedLoans = 0;
+  const totalLoans = byLoan.size;
+
   for (const [lid, txs] of byLoan) {
+    processedLoans += 1;
     let currentSchedule = txs[0]?.emi_schedule || null;
     const adminTargetEmiNumbers = new Set();
     let emiPaymentSeq = 0;
@@ -520,7 +553,7 @@ async function backfillAdminRepaymentRecords(executeQuery, {
       }
     }
 
-    if (!dryRun && adminTargetEmiNumbers.size > 0) {
+    if (adminTargetEmiNumbers.size > 0) {
       try {
         const schedule = parseEmiSchedule(currentSchedule);
         if (schedule && schedule.length > 0) {
@@ -529,11 +562,13 @@ async function backfillAdminRepaymentRecords(executeQuery, {
           const revert = revertSpuriousPaidEmis(schedule, allowed);
           if (revert.updated) {
             currentSchedule = revert.emiScheduleArray;
-            await executeQuery(
-              `UPDATE loan_applications SET emi_schedule = ?, updated_at = NOW() WHERE id = ?`,
-              [JSON.stringify(currentSchedule), lid]
-            );
-            summary.emiSchedulesFixed += 1;
+            if (!dryRun) {
+              await executeQuery(
+                `UPDATE loan_applications SET emi_schedule = ?, updated_at = NOW() WHERE id = ?`,
+                [JSON.stringify(currentSchedule), lid]
+              );
+              summary.emiSchedulesFixed += 1;
+            }
             summary.spuriousEmisReverted += 1;
           }
         }
@@ -543,6 +578,15 @@ async function backfillAdminRepaymentRecords(executeQuery, {
           message: `EMI reconcile failed: ${err.message}`
         });
       }
+    }
+
+    if (typeof onProgress === 'function') {
+      onProgress({
+        processed: processedLoans,
+        total: totalLoans,
+        loanId: lid,
+        pct: totalLoans > 0 ? Math.round((processedLoans / totalLoans) * 100) : 100
+      });
     }
   }
 
@@ -556,5 +600,6 @@ module.exports = {
   markAdminEmiPaidInSchedule,
   resolvePaymentTypeForAdminTransaction,
   syncAdminRepaymentTransaction,
+  countBackfillScope,
   backfillAdminRepaymentRecords
 };
