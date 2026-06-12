@@ -17,19 +17,11 @@ const loadEnv = () => {
       const result = require('dotenv').config({ path: p });
       if (!result.error) {
         loaded = true;
-        // We don't break immediately because we might want to overlay, 
-        // but typically one is enough. Let's keep going to ensure we get *some* variables if split.
-        // However, usually first match is preferred or we want specific override.
-        // For now, let's assume if we find one valid one, we break? 
-        // Or keep loading to ensure all vars are present?
-        // Let's break on first successful load to avoid confusion, 
-        // assuming priority is top-down.
         break;
       }
     }
   }
 
-  // Fallback to default load which uses cwd
   if (!loaded) {
     console.log('Trying default dotenv load...');
     require('dotenv').config();
@@ -38,100 +30,148 @@ const loadEnv = () => {
 
 loadEnv();
 
-const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
-const { Upload } = require('@aws-sdk/lib-storage');
-const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+const creditLabStorage = require('./creditLabPocketStorageService');
 
-// Initialize S3 Client
-const s3Client = new S3Client({
-  region: process.env.AWS_REGION || 'ap-south-1',
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  },
-});
+const useCreditLabStorage = creditLabStorage.isCreditLabStorageEnabled();
+
+let s3Client;
+let Upload;
+let PutObjectCommand;
+let DeleteObjectCommand;
+let GetObjectCommand;
+let getSignedUrl;
+
+if (!useCreditLabStorage) {
+  ({ S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3'));
+  ({ Upload } = require('@aws-sdk/lib-storage'));
+  ({ getSignedUrl } = require('@aws-sdk/s3-request-presigner'));
+
+  s3Client = new S3Client({
+    region: process.env.AWS_REGION || 'ap-south-1',
+    credentials: {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    },
+  });
+}
 
 const BUCKET_NAME = process.env.AWS_S3_BUCKET;
-const S3_PREFIX = process.env.S3_PREFIX || 'pocket'; // Base folder prefix
+const S3_PREFIX = process.env.S3_PREFIX || 'pocket';
 
-if (!BUCKET_NAME) {
+if (!useCreditLabStorage && !BUCKET_NAME) {
   console.error('❌ ERROR: AWS_S3_BUCKET environment variable is not set!');
-  console.error('   Please add AWS_S3_BUCKET to your .env file');
+  console.error('   Set CREDITLAB_POCKET_API_TOKEN or AWS_S3_BUCKET in your .env file');
+}
+
+if (useCreditLabStorage) {
+  console.log('📦 File storage: CreditLab Pocket API (no direct S3 credentials required)');
+}
+
+function sanitizeFileName(fileName) {
+  let sanitizedFileName = fileName.replace(/[\/\\]/g, '_');
+
+  sanitizedFileName = sanitizedFileName
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\x00-\x7F]/g, '')
+    .replace(/\s+/g, '_')
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^[._-]+|[._-]+$/g, '')
+    .trim();
+
+  if (!sanitizedFileName || sanitizedFileName.length === 0) {
+    sanitizedFileName = 'document';
+  }
+
+  const lastDotIndex = sanitizedFileName.lastIndexOf('.');
+  if (lastDotIndex > 0 && lastDotIndex < sanitizedFileName.length - 1) {
+    const name = sanitizedFileName.substring(0, lastDotIndex);
+    const ext = sanitizedFileName.substring(lastDotIndex + 1).toLowerCase();
+    sanitizedFileName = `${name}.${ext}`;
+  }
+
+  const maxFileNameLength = 200;
+  if (sanitizedFileName.length > maxFileNameLength) {
+    const ext = sanitizedFileName.substring(sanitizedFileName.lastIndexOf('.'));
+    const nameWithoutExt = sanitizedFileName.substring(0, sanitizedFileName.lastIndexOf('.'));
+    sanitizedFileName = nameWithoutExt.substring(0, maxFileNameLength - ext.length) + ext;
+  }
+
+  return sanitizedFileName;
+}
+
+function buildRelativeStoragePath(options = {}) {
+  const {
+    folder = 'documents',
+    userId = null,
+    documentType = null,
+  } = options;
+
+  let storagePath = folder || 'documents';
+  if (userId) storagePath += `/${userId}`;
+  if (documentType) storagePath += `/${documentType}`;
+
+  return storagePath;
+}
+
+function toDirectS3Key(relativeKey) {
+  const normalized = creditLabStorage.normalizeStorageKey(relativeKey);
+  return `${S3_PREFIX}/${normalized}`;
 }
 
 /**
- * Generic file upload to S3 - Can be used for all file types
- * @param {Buffer} fileBuffer - File buffer
- * @param {string} fileName - Original file name
- * @param {string} mimeType - MIME type (e.g., 'image/jpeg', 'application/pdf')
- * @param {Object} options - Upload options
- * @param {string} options.folder - Specific folder (e.g., 'student-documents', 'kyc', 'profile-pics')
- * @param {number} options.userId - User ID (for organizing by user)
- * @param {string} options.documentType - Document type (e.g., 'college_id_front', 'pan_card')
- * @param {boolean} options.isPublic - Whether file should be publicly accessible (default: false)
- * @returns {Promise<{success: boolean, key: string, url: string, size: number}>}
+ * Generic file upload - CreditLab API or direct S3 fallback.
+ * Returns a key relative to pocket/ when using CreditLab; legacy full S3 key otherwise.
  */
 async function uploadToS3(fileBuffer, fileName, mimeType, options = {}) {
+  let sanitizedFileName;
+  let relativeKey;
+
   try {
     const {
       folder = 'documents',
       userId = null,
       documentType = null,
-      isPublic = false
+      isPublic = false,
     } = options;
 
-    // Build S3 path: prefix/folder/userId/documentType/timestamp-filename
-    let s3Path = S3_PREFIX;
+    if (isPublic && useCreditLabStorage) {
+      console.warn('⚠️  Public ACL is not supported via CreditLab storage; file will remain private');
+    }
 
-    if (folder) s3Path += `/${folder}`;
-    if (userId) s3Path += `/${userId}`;
-    if (documentType) s3Path += `/${documentType}`;
-
+    const storagePath = buildRelativeStoragePath({ folder, userId, documentType });
     const timestamp = Date.now();
-    
-    // Enhanced filename sanitization to handle all edge cases
-    // 1. Remove any path separators to prevent directory traversal
-    let sanitizedFileName = fileName.replace(/[\/\\]/g, '_');
-    
-    // 2. Convert to ASCII-compatible format (remove Unicode, emoji, etc.)
-    sanitizedFileName = sanitizedFileName
-      .normalize('NFD') // Normalize Unicode characters
-      .replace(/[\u0300-\u036f]/g, '') // Remove diacritics
-      .replace(/[^\x00-\x7F]/g, '') // Remove non-ASCII characters
-      .replace(/\s+/g, '_') // Replace whitespace with underscores
-      .replace(/[^a-zA-Z0-9._-]/g, '_') // Keep only alphanumeric, dots, hyphens, underscores
-      .replace(/_+/g, '_') // Replace multiple underscores with single
-      .replace(/^[._-]+|[._-]+$/g, '') // Remove leading/trailing special chars
-      .trim();
-    
-    // 3. Ensure filename is not empty after sanitization
-    if (!sanitizedFileName || sanitizedFileName.length === 0) {
-      sanitizedFileName = 'document';
-    }
-    
-    // 4. Handle file extension
-    const lastDotIndex = sanitizedFileName.lastIndexOf('.');
-    if (lastDotIndex > 0 && lastDotIndex < sanitizedFileName.length - 1) {
-      const name = sanitizedFileName.substring(0, lastDotIndex);
-      const ext = sanitizedFileName.substring(lastDotIndex + 1).toLowerCase();
-      sanitizedFileName = `${name}.${ext}`;
-    }
-    
-    // 5. Truncate if filename is too long (S3 key limit is 1024 chars, but keep it reasonable)
-    const maxFileNameLength = 200;
-    if (sanitizedFileName.length > maxFileNameLength) {
-      const ext = sanitizedFileName.substring(sanitizedFileName.lastIndexOf('.'));
-      const nameWithoutExt = sanitizedFileName.substring(0, sanitizedFileName.lastIndexOf('.'));
-      sanitizedFileName = nameWithoutExt.substring(0, maxFileNameLength - ext.length) + ext;
-    }
-    
-    const uniqueFileName = `${s3Path}/${timestamp}-${sanitizedFileName}`;
+    sanitizedFileName = sanitizeFileName(fileName);
+    relativeKey = `${storagePath}/${timestamp}-${sanitizedFileName}`;
 
-    const BUCKET_NAME = process.env.AWS_S3_BUCKET;
-    if (!BUCKET_NAME) throw new Error('AWS_S3_BUCKET is not set');
+    if (useCreditLabStorage) {
+      const result = await creditLabStorage.upload(
+        fileBuffer,
+        relativeKey,
+        mimeType,
+        fileName
+      );
+
+      console.log(`✅ File uploaded via CreditLab API: ${result.key}`);
+
+      return {
+        success: true,
+        key: result.key,
+        url: null,
+        bucket: 'creditlab.in',
+        location: result.s3_key,
+        size: fileBuffer.length,
+        mimeType,
+      };
+    }
+
+    const uniqueFileName = toDirectS3Key(relativeKey);
+    const bucketName = process.env.AWS_S3_BUCKET;
+    if (!bucketName) throw new Error('AWS_S3_BUCKET is not set');
 
     const uploadParams = {
-      Bucket: BUCKET_NAME,
+      Bucket: bucketName,
       Key: uniqueFileName,
       Body: fileBuffer,
       ContentType: mimeType,
@@ -143,12 +183,10 @@ async function uploadToS3(fileBuffer, fileName, mimeType, options = {}) {
       },
     };
 
-    // Add ACL only if public
     if (isPublic) {
       uploadParams.ACL = 'public-read';
     }
 
-    // Use Upload for better handling of large files
     const upload = new Upload({
       client: s3Client,
       params: uploadParams,
@@ -162,8 +200,8 @@ async function uploadToS3(fileBuffer, fileName, mimeType, options = {}) {
     const result = await upload.done();
 
     const fileUrl = isPublic
-      ? `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${uniqueFileName}`
-      : null; // For private files, use presigned URLs
+      ? `https://${bucketName}.s3.${process.env.AWS_REGION}.amazonaws.com/${uniqueFileName}`
+      : null;
 
     console.log(`✅ File uploaded to S3: ${uniqueFileName}`);
 
@@ -171,50 +209,51 @@ async function uploadToS3(fileBuffer, fileName, mimeType, options = {}) {
       success: true,
       key: uniqueFileName,
       url: fileUrl,
-      bucket: BUCKET_NAME,
+      bucket: bucketName,
       location: result.Location,
       size: fileBuffer.length,
-      mimeType: mimeType,
+      mimeType,
     };
   } catch (error) {
-    console.error('❌ S3 Upload Error:', {
+    console.error('❌ Storage Upload Error:', {
       error: error.message,
       code: error.code,
-      fileName: fileName,
-      sanitizedFileName: sanitizedFileName,
-      uniqueFileName: uniqueFileName,
+      fileName,
+      sanitizedFileName,
+      relativeKey,
       bucket: BUCKET_NAME,
-      mimeType: mimeType,
-      fileSize: fileBuffer?.length
+      mimeType,
+      fileSize: fileBuffer?.length,
     });
-    
-    // Provide more specific error messages
-    let errorMessage = 'Failed to upload file to S3';
+
+    let errorMessage = useCreditLabStorage
+      ? 'Failed to upload file via CreditLab storage API'
+      : 'Failed to upload file to S3';
+
     if (error.message.includes('pattern')) {
       errorMessage += ': Invalid filename format. Please try renaming your file to use only letters, numbers, and basic punctuation.';
     } else if (error.code === 'AccessDenied') {
-      errorMessage += ': Access denied. Please check S3 bucket permissions.';
+      errorMessage += ': Access denied. Please check storage permissions.';
     } else if (error.code === 'NoSuchBucket') {
-      errorMessage += ': S3 bucket not found. Please check configuration.';
+      errorMessage += ': Storage bucket not found. Please check configuration.';
     } else {
       errorMessage += `: ${error.message}`;
     }
-    
+
     throw new Error(errorMessage);
   }
 }
 
-/**
- * Delete file from S3
- * @param {string} key - S3 object key
- * @returns {Promise<{success: boolean}>}
- */
 async function deleteFromS3(key) {
   try {
-    const BUCKET_NAME = process.env.AWS_S3_BUCKET;
+    if (useCreditLabStorage) {
+      return creditLabStorage.deleteFile(key);
+    }
+
+    const bucketName = process.env.AWS_S3_BUCKET;
     const deleteParams = {
-      Bucket: BUCKET_NAME,
-      Key: key,
+      Bucket: bucketName,
+      Key: toDirectS3Key(key),
     };
 
     await s3Client.send(new DeleteObjectCommand(deleteParams));
@@ -224,76 +263,71 @@ async function deleteFromS3(key) {
       message: 'File deleted successfully',
     };
   } catch (error) {
-    console.error('S3 Delete Error:', error);
-    throw new Error(`Failed to delete file from S3: ${error.message}`);
+    console.error('Storage Delete Error:', error);
+    throw new Error(`Failed to delete file: ${error.message}`);
   }
 }
 
-/**
- * Generate presigned URL for secure file access
- * @param {string} key - S3 object key
- * @param {number} expiresIn - URL expiration time in seconds (default: 1 hour)
- * @returns {Promise<string>}
- */
 async function getPresignedUrl(key, expiresIn = 3600) {
   try {
-    const BUCKET_NAME = process.env.AWS_S3_BUCKET;
-    if (!BUCKET_NAME) throw new Error('AWS_S3_BUCKET is not set');
+    if (useCreditLabStorage) {
+      return creditLabStorage.presign(key, expiresIn);
+    }
+
+    const bucketName = process.env.AWS_S3_BUCKET;
+    if (!bucketName) throw new Error('AWS_S3_BUCKET is not set');
 
     const command = new GetObjectCommand({
-      Bucket: BUCKET_NAME,
-      Key: key,
+      Bucket: bucketName,
+      Key: toDirectS3Key(key),
     });
 
-    const url = await getSignedUrl(s3Client, command, { expiresIn });
-    return url;
+    return getSignedUrl(s3Client, command, { expiresIn });
   } catch (error) {
     console.error('Generate Presigned URL Error:', error);
     throw new Error(`Failed to generate presigned URL: ${error.message}`);
   }
 }
 
-/**
- * Download file from S3
- * @param {string} key - S3 object key
- * @returns {Promise<Buffer>}
- */
 async function downloadFromS3(key) {
   try {
-    const BUCKET_NAME = process.env.AWS_S3_BUCKET;
-    if (!BUCKET_NAME) throw new Error('AWS_S3_BUCKET is not set');
+    if (useCreditLabStorage) {
+      return creditLabStorage.download(key);
+    }
+
+    const bucketName = process.env.AWS_S3_BUCKET;
+    if (!bucketName) throw new Error('AWS_S3_BUCKET is not set');
 
     const command = new GetObjectCommand({
-      Bucket: BUCKET_NAME,
-      Key: key,
+      Bucket: bucketName,
+      Key: toDirectS3Key(key),
     });
 
     const response = await s3Client.send(command);
-    
-    // Convert stream to buffer
+
     const chunks = [];
     for await (const chunk of response.Body) {
       chunks.push(chunk);
     }
-    const buffer = Buffer.concat(chunks);
-    
-    return buffer;
+
+    return Buffer.concat(chunks);
   } catch (error) {
-    console.error('Download from S3 Error:', error);
-    throw new Error(`Failed to download file from S3: ${error.message}`);
+    console.error('Download from storage Error:', error);
+    throw new Error(`Failed to download file: ${error.message}`);
   }
 }
 
-/**
- * Validate S3 configuration
- * @returns {boolean}
- */
 function validateS3Config() {
+  if (useCreditLabStorage) {
+    return creditLabStorage.validateCreditLabStorageConfig();
+  }
+
   const required = ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_REGION', 'AWS_S3_BUCKET'];
-  const missing = required.filter((key) => !process.env[key]);
+  const missing = required.filter((envKey) => !process.env[envKey]);
 
   if (missing.length > 0) {
     console.warn(`⚠️  Missing S3 configuration: ${missing.join(', ')}`);
+    console.warn('   Set CREDITLAB_POCKET_API_TOKEN to use CreditLab storage instead of direct S3');
     return false;
   }
 
@@ -301,18 +335,6 @@ function validateS3Config() {
   return true;
 }
 
-// ============================================
-// CONVENIENCE WRAPPER FUNCTIONS
-// ============================================
-
-/**
- * Upload student document
- * @param {Buffer} fileBuffer - File buffer
- * @param {string} fileName - File name
- * @param {string} mimeType - MIME type
- * @param {number} userId - User ID
- * @param {string} documentType - Document type (e.g., 'college_id_front', 'marks_memo')
- */
 async function uploadStudentDocument(fileBuffer, fileName, mimeType, userId, documentType) {
   return uploadToS3(fileBuffer, fileName, mimeType, {
     folder: 'student-documents',
@@ -322,14 +344,6 @@ async function uploadStudentDocument(fileBuffer, fileName, mimeType, userId, doc
   });
 }
 
-/**
- * Upload KYC document
- * @param {Buffer} fileBuffer - File buffer
- * @param {string} fileName - File name
- * @param {string} mimeType - MIME type
- * @param {number} userId - User ID
- * @param {string} documentType - Document type (e.g., 'pan_card', 'aadhar_front')
- */
 async function uploadKYCDocument(fileBuffer, fileName, mimeType, userId, documentType) {
   return uploadToS3(fileBuffer, fileName, mimeType, {
     folder: 'kyc-documents',
@@ -339,13 +353,6 @@ async function uploadKYCDocument(fileBuffer, fileName, mimeType, userId, documen
   });
 }
 
-/**
- * Upload profile picture
- * @param {Buffer} fileBuffer - File buffer
- * @param {string} fileName - File name
- * @param {string} mimeType - MIME type
- * @param {number} userId - User ID
- */
 async function uploadProfilePicture(fileBuffer, fileName, mimeType, userId) {
   return uploadToS3(fileBuffer, fileName, mimeType, {
     folder: 'profile-pictures',
@@ -355,14 +362,6 @@ async function uploadProfilePicture(fileBuffer, fileName, mimeType, userId) {
   });
 }
 
-/**
- * Upload loan agreement document
- * @param {Buffer} fileBuffer - File buffer
- * @param {string} fileName - File name
- * @param {string} mimeType - MIME type
- * @param {number} userId - User ID
- * @param {string} loanId - Loan application ID
- */
 async function uploadLoanDocument(fileBuffer, fileName, mimeType, userId, loanId) {
   return uploadToS3(fileBuffer, fileName, mimeType, {
     folder: 'loan-documents',
@@ -372,13 +371,6 @@ async function uploadLoanDocument(fileBuffer, fileName, mimeType, userId, loanId
   });
 }
 
-/**
- * Upload generated PDF (KFS, Loan Agreement, etc.)
- * @param {Buffer} fileBuffer - File buffer
- * @param {string} fileName - File name
- * @param {number} userId - User ID
- * @param {string} documentType - Document type (e.g., 'kfs', 'loan-agreement')
- */
 async function uploadGeneratedPDF(fileBuffer, fileName, userId, documentType) {
   return uploadToS3(fileBuffer, fileName, 'application/pdf', {
     folder: 'generated-documents',
@@ -389,19 +381,17 @@ async function uploadGeneratedPDF(fileBuffer, fileName, userId, documentType) {
 }
 
 module.exports = {
-  // Core functions
   uploadToS3,
   deleteFromS3,
   getPresignedUrl,
   downloadFromS3,
   validateS3Config,
   s3Client,
-
-  // Convenience wrappers for specific use cases
   uploadStudentDocument,
   uploadKYCDocument,
   uploadProfilePicture,
   uploadLoanDocument,
   uploadGeneratedPDF,
+  isCreditLabStorageEnabled: creditLabStorage.isCreditLabStorageEnabled,
+  normalizeStorageKey: creditLabStorage.normalizeStorageKey,
 };
-

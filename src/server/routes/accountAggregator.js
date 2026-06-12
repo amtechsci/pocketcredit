@@ -320,10 +320,13 @@ router.post('/upload-statement', requireAuth, upload.single('statement'), async 
       });
     }
 
-    // Also upload to S3 for backup
-    const s3Key = `bank-statements/${userId}/${application_id}/${Date.now()}_${req.file.originalname}`;
-    await uploadToS3(req.file.buffer, s3Key, req.file.mimetype, false);
-    const fileUrl = `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`;
+    // Also upload to storage for backup (CreditLab API or direct S3)
+    const s3Result = await uploadToS3(req.file.buffer, req.file.originalname, req.file.mimetype, {
+      folder: 'bank-statements',
+      userId,
+      documentType: String(application_id),
+      isPublic: false,
+    });
 
     // Store in database
     await executeQuery(
@@ -338,7 +341,7 @@ router.post('/upload-statement', requireAuth, upload.single('statement'), async 
        upload_method = VALUES(upload_method),
        status = 'processing', 
        updated_at = NOW()`,
-      [userId, application_id, clientRefNum, mobileNumber, bank_name || null, fileUrl, req.file.originalname, req.file.size]
+      [userId, application_id, clientRefNum, mobileNumber, bank_name || null, s3Result.key, req.file.originalname, req.file.size]
     );
 
     res.json({

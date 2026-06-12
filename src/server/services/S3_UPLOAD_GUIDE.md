@@ -1,18 +1,29 @@
-# S3 File Upload Helper - Usage Guide
+# File Storage Helper - Usage Guide
 
 ## Overview
-Generic S3 file upload service for handling all file uploads in the Pocket Credit application.
+Generic file storage service for handling all file uploads in the Pocket Credit application.
+
+Production uses the **CreditLab Pocket S3 Bridge** — Pocket calls the CreditLab API; CreditLab reads/writes `s3://creditlab.in/pocket/` on Pocket's behalf. No AWS credentials are required in Pocket when `CREDITLAB_POCKET_API_TOKEN` is set.
 
 ## Configuration (.env)
+
+### Production (CreditLab API — recommended)
+```env
+CREDITLAB_POCKET_API_BASE_URL=https://creditlab.in/api/pocket/
+CREDITLAB_POCKET_API_TOKEN=your-token-from-creditlab
+```
+
+### Local dev fallback (direct S3 — optional)
+Only used when `CREDITLAB_POCKET_API_TOKEN` is not set:
 ```env
 AWS_ACCESS_KEY_ID=your_aws_access_key_id_here
 AWS_SECRET_ACCESS_KEY=your_aws_secret_access_key_here
 AWS_REGION=ap-south-1
-AWS_S3_BUCKET=your-bucket-name
+AWS_S3_BUCKET=creditlab.in
 S3_PREFIX=pocket
 ```
 
-**⚠️ IMPORTANT: Never commit actual AWS credentials to Git! Always use environment variables.**
+**⚠️ IMPORTANT: Never commit API tokens or AWS credentials to Git! Store them in environment variables only (backend server).**
 
 ## S3 Folder Structure
 ```
@@ -58,12 +69,13 @@ const uploadResult = await uploadStudentDocument(
 // Result:
 // {
 //   success: true,
-//   key: 'pocket/student-documents/123/college_id_front/1234567890-college_id.jpg',
+//   key: 'student-documents/123/college_id_front/1234567890-college_id.jpg',
 //   url: null,  // Private file, use presigned URL
 //   bucket: 'creditlab.in',
 //   size: 245678,
 //   mimeType: 'image/jpeg'
 // }
+// key is relative to pocket/ — do not include the pocket/ prefix when storing in DB
 ```
 
 ### 2. KYC Documents (PAN, Aadhar)
