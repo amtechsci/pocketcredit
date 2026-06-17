@@ -138,8 +138,9 @@ async function computeLoanCalculationResponseData(loanId, opts = {}) {
     : null;
   const calculationDate = opts.calculationDate || null;
   // Opt-in overrides used by eNACH auto-debit only (all other callers keep today + persist):
-  //  - recalcAsOfDate: compute the multi-EMI penalty/DPD "as of" this date instead of today, so
-  //    eNACH can present a one-day-ahead amount that buffers the 1–2 day mandate settlement lag.
+  //  - recalcAsOfDate: compute ALL penalty/DPD/overdue date logic (per-EMI schedule AND the
+  //    loan-level penalty/exhausted-days/days-past-due aggregates) "as of" this date instead of
+  //    today, so eNACH can present a one-day-ahead amount that buffers the mandate settlement lag.
   //  - persist === false: do NOT write the recomputed schedule back to loan_applications, so a
   //    forward-dated "what-if" computation never corrupts the stored (today's) amounts.
   const recalcAsOfDate = opts.recalcAsOfDate || null;
@@ -1256,7 +1257,7 @@ async function computeLoanCalculationResponseData(loanId, opts = {}) {
     // calculateDaysBetween is INCLUSIVE: Jan 31 to Jan 31 = 1 day, Jan 31 to Feb 1 = 2 days
     // This matches user's logic: "if today is 31 we count 31 as 1, 1 feb will be 2"
     if (baseDateStr) {
-      const todayStr = getTodayString();
+      const todayStr = recalcAsOfDate || getTodayString();
       console.log(`[Exhausted Days] baseDateStr: ${baseDateStr}, todayStr: ${todayStr}`);
       
       // Use inclusive counting directly (no -1 adjustment needed)
@@ -1327,7 +1328,7 @@ async function computeLoanCalculationResponseData(loanId, opts = {}) {
       }
       
       if (dueDate) {
-        const todayStr = getTodayString();
+        const todayStr = recalcAsOfDate || getTodayString();
         if (dueDate < todayStr) {
           daysPastDue = calculateDaysBetween(dueDate, todayStr) - 1; // Exclude today
           daysPastDue = Math.max(1, daysPastDue);
@@ -1364,7 +1365,7 @@ async function computeLoanCalculationResponseData(loanId, opts = {}) {
             
             // Calculate DPD for the first overdue EMI
             if (daysPastDue === 0 && emi.due_date) {
-              const todayStr = getTodayString();
+              const todayStr = recalcAsOfDate || getTodayString();
               const emiDateStr = typeof emi.due_date === 'string' ? emi.due_date.split('T')[0] : formatDateToString(emi.due_date);
               if (emiDateStr < todayStr) {
                 daysPastDue = calculateDaysBetween(emiDateStr, todayStr) - 1; // Exclude today
@@ -1387,7 +1388,7 @@ async function computeLoanCalculationResponseData(loanId, opts = {}) {
         }
         
         if (dueDate) {
-          const todayStr = getTodayString();
+          const todayStr = recalcAsOfDate || getTodayString();
           if (dueDate < todayStr) {
             // Loan is overdue - calculate days past due
             daysPastDue = calculateDaysBetween(dueDate, todayStr) - 1; // Exclude today

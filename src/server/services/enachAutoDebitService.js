@@ -328,9 +328,12 @@ async function getEligibleLoansForToday(todayStr) {
         ...overdueEmi,
         amount: presentationAmount,
         penaltyAmount: penalty,
-        // One day of penalty + DPD accrual, carried so the success-side check can accept the EMI as
-        // fully paid when the live due has grown by up to a day during the settlement window.
+        // One day of penalty + DPD accrual (informational; the charge over-collects by this buffer).
         dailyAccrual: oneDayAccrual,
+        // The borrower's obligation as of presentation: today's full penalty-inclusive due for this
+        // EMI minus any prior paid. The success-side check clears the EMI when the charge covered
+        // this, regardless of how long settlement took (only in-transit accrual is waived).
+        presentationDue: baseToday,
         daysOverdue
       }
     });
@@ -394,9 +397,10 @@ async function getOrCreatePresentationRun(candidate, presentationDateStr) {
   }
 
   // 4. Insert a new run for today.
-  // request_data carries daily_accrual so the (later) pending-recheck can apply the same one-day
-  // tolerance when crediting the settled charge against the by-then-grown live due.
+  // request_data carries due_at_presentation so the (later) pending-recheck credits the settled
+  // charge against the borrower's presentation-date obligation, not the by-then-grown live due.
   const requestData = JSON.stringify({
+    due_at_presentation: candidate.dueEmi.presentationDue || 0,
     daily_accrual: candidate.dueEmi.dailyAccrual || 0,
     days_overdue: candidate.dueEmi.daysOverdue || 0
   });
@@ -535,7 +539,7 @@ async function runDueDateAutoDebit({ forceDryRun = false, forceRun = false } = {
         status: 'FAILED',
         subscriptionId: chargeResult.subscriptionId || null,
         paymentId: chargeResult.paymentId || null,
-        requestData: { amount: candidate.dueEmi.amount, penalty: candidate.dueEmi.penaltyAmount, dpd: candidate.dueEmi.daysOverdue, daily_accrual: candidate.dueEmi.dailyAccrual || 0 },
+        requestData: { amount: candidate.dueEmi.amount, penalty: candidate.dueEmi.penaltyAmount, dpd: candidate.dueEmi.daysOverdue, daily_accrual: candidate.dueEmi.dailyAccrual || 0, due_at_presentation: candidate.dueEmi.presentationDue || 0 },
         responseData: chargeResult.response || {},
         lastError: chargeResult.error || 'Charge request failed'
       });
@@ -544,22 +548,25 @@ async function runDueDateAutoDebit({ forceDryRun = false, forceRun = false } = {
     }
 
     if (chargeStatus === 'SUCCESS') {
-      await applySuccessfulChargeToLoan({
+      const applyRes = await applySuccessfulChargeToLoan({
         loanApplicationId: candidate.loan_application_id,
         paymentId: chargeResult.paymentId,
         amount: candidate.dueEmi.amount,
-        // Allow up to one day of accrual shortfall vs the live due (charge carried a one-day buffer)
-        dueTolerance: candidate.dueEmi.dailyAccrual || 0
+        // Clear the EMI when the charge covered the presentation-date obligation (lag-agnostic)
+        presentationDue: candidate.dueEmi.presentationDue || 0
       });
+      // PARTIAL (not SUCCESS) when the charge didn't fully cover the due, so the EMI is not treated
+      // as "already paid" and the remainder is re-presented after the cooldown.
+      const runStatus = applyRes && applyRes.emiFullyPaid === false ? 'PARTIAL' : 'SUCCESS';
       success++;
       await updateRunById(runId, {
-        status: 'SUCCESS',
+        status: runStatus,
         subscriptionId: chargeResult.subscriptionId || null,
         paymentId: chargeResult.paymentId || null,
-        requestData: { amount: candidate.dueEmi.amount, penalty: candidate.dueEmi.penaltyAmount, dpd: candidate.dueEmi.daysOverdue, daily_accrual: candidate.dueEmi.dailyAccrual || 0 },
+        requestData: { amount: candidate.dueEmi.amount, penalty: candidate.dueEmi.penaltyAmount, dpd: candidate.dueEmi.daysOverdue, daily_accrual: candidate.dueEmi.dailyAccrual || 0, due_at_presentation: candidate.dueEmi.presentationDue || 0 },
         responseData: chargeResult.response || {}
       });
-      attemptedDetails.push({ ...detail, status: 'SUCCESS', paymentId: chargeResult.paymentId });
+      attemptedDetails.push({ ...detail, status: runStatus, paymentId: chargeResult.paymentId });
     } else {
       // PENDING — Cashfree accepted but not yet settled; recheck job will follow up
       pending++;
@@ -567,7 +574,7 @@ async function runDueDateAutoDebit({ forceDryRun = false, forceRun = false } = {
         status: 'PENDING',
         subscriptionId: chargeResult.subscriptionId || null,
         paymentId: chargeResult.paymentId || null,
-        requestData: { amount: candidate.dueEmi.amount, penalty: candidate.dueEmi.penaltyAmount, dpd: candidate.dueEmi.daysOverdue, daily_accrual: candidate.dueEmi.dailyAccrual || 0 },
+        requestData: { amount: candidate.dueEmi.amount, penalty: candidate.dueEmi.penaltyAmount, dpd: candidate.dueEmi.daysOverdue, daily_accrual: candidate.dueEmi.dailyAccrual || 0, due_at_presentation: candidate.dueEmi.presentationDue || 0 },
         responseData: chargeResult.response || {}
       });
       attemptedDetails.push({ ...detail, status: 'PENDING', paymentId: chargeResult.paymentId });
@@ -629,27 +636,32 @@ async function recheckPendingAutoDebitCharges({ forceRun = false } = {}) {
       const paymentStatus = String(payment.payment_status || '').toUpperCase();
 
       if (paymentStatus === 'SUCCESS') {
-        // This charge was presented 1–2 days ago with a one-day buffer; allow the same one-day
-        // accrual tolerance now that the live due may have grown during the settlement window.
-        let runDailyAccrual = 0;
+        // This charge may have been presented several days ago. Credit it against the borrower's
+        // presentation-date obligation (stored on the run), not the by-now grown live due, so the
+        // EMI clears regardless of settlement lag (only in-transit accrual is waived).
+        let runPresentationDue = 0;
         try {
           const rd = run.request_data
             ? (typeof run.request_data === 'string' ? JSON.parse(run.request_data) : run.request_data)
             : null;
-          runDailyAccrual = Number(rd && rd.daily_accrual) || 0;
-        } catch (_) { /* no stored accrual → strict coverage */ }
+          runPresentationDue = Number(rd && rd.due_at_presentation) || 0;
+        } catch (_) { /* no stored obligation → strict live-due coverage */ }
 
-        await applySuccessfulChargeToLoan({
+        const applyRes = await applySuccessfulChargeToLoan({
           loanApplicationId: run.loan_application_id,
           paymentId: run.payment_id,
           amount: run.amount,
-          dueTolerance: runDailyAccrual
+          presentationDue: runPresentationDue
         });
+        // If the settled amount did not fully cover the (by-now grown) due, record PARTIAL — not
+        // SUCCESS — so the EMI isn't treated as "already paid" and the remainder is re-presented
+        // after the cooldown. SUCCESS is reserved for a fully-cleared EMI.
+        const runStatus = applyRes && applyRes.emiFullyPaid === false ? 'PARTIAL' : 'SUCCESS';
         await executeQuery(
           `UPDATE enach_auto_debit_runs
-           SET status = 'SUCCESS', response_data = ?, last_error = NULL, updated_at = NOW()
+           SET status = ?, response_data = ?, last_error = NULL, updated_at = NOW()
            WHERE id = ?`,
-          [JSON.stringify(payment), run.id]
+          [runStatus, JSON.stringify(payment), run.id]
         );
         success++;
       } else if (paymentStatus === 'FAILED') {

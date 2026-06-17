@@ -3556,10 +3556,32 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
         if (loan.user_id == userIdInt || loan.user_id == userId) {
           console.log(`✅ Loan ownership confirmed. Current status: ${loan.status}`);
 
-          // closed_amount reflects the ACTUAL amount paid/settled, not total_repayable. For
-          // full_payment this was validated (above) to cover the outstanding; for a settlement it
-          // may be a negotiated lower amount — recording the real figure keeps closure accurate.
-          const closedAmount = parseFloat(amount) || 0;
+          // closed_amount reflects the amount paid/settled. For full_payment the entered amount may
+          // be up to ₹1 short of the due (rounding tolerance in the validation above), but a CLEARED
+          // loan must never record an uncollected balance — so record at least the full live
+          // outstanding (max of entered and outstanding). A settlement may legitimately close for a
+          // negotiated lower amount, so it records exactly what was entered.
+          const enteredAmount = parseFloat(amount) || 0;
+          let fpOutstanding = 0;
+          try {
+            const schedForOut = typeof loan.emi_schedule === 'string' ? JSON.parse(loan.emi_schedule) : loan.emi_schedule;
+            if (Array.isArray(schedForOut) && schedForOut.length > 0) {
+              for (const e of schedForOut) {
+                if (String(e.status || '').toLowerCase() === 'paid') continue;
+                const due = parseFloat(e.emi_amount || e.instalment_amount || 0) || 0;
+                const paidSoFar = parseFloat(e.paid_amount || 0) || 0;
+                fpOutstanding += Math.max(0, due - paidSoFar);
+              }
+            } else {
+              fpOutstanding = parseFloat(loan.total_repayable) || 0;
+            }
+          } catch (e) {
+            fpOutstanding = parseFloat(loan.total_repayable) || 0;
+          }
+          fpOutstanding = Math.round(fpOutstanding * 100) / 100;
+          const closedAmount = txType === 'settlement'
+            ? enteredAmount
+            : Math.max(enteredAmount, fpOutstanding);
           // Use the transaction date chosen by admin as the loan closed date
           const closedDate = txDate;
           let updateSet = `status = 'cleared', closed_date = ?, closed_amount = ?, updated_at = NOW()`;

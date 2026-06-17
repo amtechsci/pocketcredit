@@ -175,17 +175,22 @@ async function resolveEnachBankReference(paymentId) {
 /**
  * Applies a SUCCESSFUL eNACH charge to the loan's EMI schedule.
  *
- * eNACH settles 1–2 days after the debit is presented, and penalty/DPD keep accruing in that window
+ * eNACH settles 1–5+ days after the debit is presented, and penalty/DPD keep accruing in that window
  * (the daily cron keeps emi_amount current). We do NOT freeze penalty — if a mandate fails the
- * borrower must keep accruing — so paid_date is the actual settlement date. Instead, the charge was
- * presented with a one-day buffer, and here we accept the EMI as fully paid when the collected amount
- * covers the (now grown) live due to within ~one day of accrual (`dueTolerance`). This tolerance is
- * eNACH-only (system-initiated); manual/admin and gateway payments use the strict coverage check.
+ * borrower must keep accruing — so paid_date is the actual settlement date. But the borrower's real
+ * obligation is the due AS OF the presentation date (that's what we debited); any extra penalty that
+ * piles up while the money is in transit is our settlement lag, not the borrower's fault. So we mark
+ * the EMI fully paid when the charge covered the presentation-date due (`presentationDue`), regardless
+ * of how much the live due has since grown — i.e. a successful charge clears the EMI even on a 4–5 day
+ * lag, waiving only the in-transit accrual. A genuinely short/stale charge (collected < presentation
+ * due) still stays partial. This presentation-due rule is eNACH-only (system-initiated); manual/admin
+ * and gateway payments use the strict live-due coverage check.
  *
- * @param {number} [dueTolerance] - One day of penalty + DPD accrual; the allowed shortfall vs the
- *   live penalty-inclusive due when deciding "fully paid". Defaults to 0 (strict).
+ * @param {number} [presentationDue] - The borrower's obligation at presentation (penalty-inclusive due
+ *   for the EMI as of the day the charge was raised, minus any prior paid). When omitted/0, falls back
+ *   to the strict live-due check.
  */
-async function applySuccessfulChargeToLoan({ loanApplicationId, paymentId, amount, dueTolerance = 0 }) {
+async function applySuccessfulChargeToLoan({ loanApplicationId, paymentId, amount, presentationDue = 0 }) {
   await initializeDatabase();
   const loans = await executeQuery(
     `SELECT id, status, user_id, application_number, emi_schedule, total_repayable
@@ -230,12 +235,15 @@ async function applySuccessfulChargeToLoan({ loanApplicationId, paymentId, amoun
   const prevPaid = Number(targetEmi.paid_amount || 0) || 0;
   const newPaid = Math.round((prevPaid + chargeAmount) * 100) / 100;
 
-  // Live penalty-inclusive due (kept current by the daily loan-calculation cron). The charge was
-  // presented with a one-day buffer, so accept the EMI as fully paid when cumulative paid covers the
-  // live due to within one day of accrual; otherwise leave it pending (a genuine shortfall).
+  // Decide "fully paid" against the borrower's PRESENTATION-DATE obligation, not the (now grown)
+  // live due — settlement lag accrual is the system's, not the borrower's. A successful charge that
+  // covered the presentation due clears the EMI even after a 4–5 day lag (only the in-transit accrual
+  // is waived). If presentationDue is unknown (e.g. an old run), fall back to the strict live-due
+  // check so a genuinely short charge is never silently treated as full.
   const liveDue = Number(targetEmi.emi_amount || targetEmi.instalment_amount || 0) || 0;
-  const tolerance = (Number(dueTolerance) || 0) + 0.5; // + rounding epsilon
-  const emiFullyPaid = liveDue <= 0 || newPaid >= liveDue - tolerance;
+  const obligation = Number(presentationDue) > 0 ? Number(presentationDue) : liveDue;
+  const EPSILON = 0.5; // rounding tolerance only
+  const emiFullyPaid = obligation <= 0 || chargeAmount >= obligation - EPSILON;
 
   schedule[targetIndex] = {
     ...targetEmi,
