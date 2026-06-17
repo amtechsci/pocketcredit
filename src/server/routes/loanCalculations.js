@@ -137,6 +137,13 @@ async function computeLoanCalculationResponseData(loanId, opts = {}) {
     ? parseInt(String(opts.customDays), 10)
     : null;
   const calculationDate = opts.calculationDate || null;
+  // Opt-in overrides used by eNACH auto-debit only (all other callers keep today + persist):
+  //  - recalcAsOfDate: compute the multi-EMI penalty/DPD "as of" this date instead of today, so
+  //    eNACH can present a one-day-ahead amount that buffers the 1–2 day mandate settlement lag.
+  //  - persist === false: do NOT write the recomputed schedule back to loan_applications, so a
+  //    forward-dated "what-if" computation never corrupts the stored (today's) amounts.
+  const recalcAsOfDate = opts.recalcAsOfDate || null;
+  const persist = opts.persist !== false;
 
   if (isNaN(loanId)) {
     throw new Error('Invalid loan ID');
@@ -1000,7 +1007,8 @@ async function computeLoanCalculationResponseData(loanId, opts = {}) {
 
         // Apply penalty + DPD only after merged payment status (paid EMIs must not carry overdue charges;
         // DPD on total principal attaches to the first overdue unpaid EMI by instalment order)
-        const todayStrRecalc = getTodayString();
+        // recalcAsOfDate (eNACH one-day-ahead buffer) overrides "today" when explicitly supplied.
+        const todayStrRecalc = recalcAsOfDate || getTodayString();
         let firstOverdueUnpaidIdx = -1;
         if (loan.status !== 'cleared') {
           for (let si = 0; si < schedule.length; si++) {
@@ -1073,7 +1081,7 @@ async function computeLoanCalculationResponseData(loanId, opts = {}) {
         // This ensures existing loans with wrong stored values get corrected automatically
         // CRITICAL: Update ALL stored calculation values (emi_schedule, fees_breakdown, disbursal_amount) based on current loan_amount
         const isRepeatDisbursal = loan.status === 'repeat_disbursal' || loan.status === 'ready_to_repeat_disbursal';
-        if (isAccountManager || isRepeatDisbursal) {
+        if ((isAccountManager || isRepeatDisbursal) && persist) {
           try {
             // Recalculate fees_breakdown with correct values based on current loan_amount
             // Combine deduct_from_disbursal and add_to_total fees

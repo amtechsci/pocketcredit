@@ -3,7 +3,6 @@ const { v4: uuidv4 } = require('uuid');
 const { executeQuery, initializeDatabase } = require('../config/database');
 const {
   parseEmiSchedule,
-  applyPaymentToEmi,
   evaluateLoanClearanceEligibility,
   recordEnachLedgerTransaction
 } = require('../utils/loanClearance');
@@ -173,7 +172,20 @@ async function resolveEnachBankReference(paymentId) {
   );
 }
 
-async function applySuccessfulChargeToLoan({ loanApplicationId, paymentId, amount }) {
+/**
+ * Applies a SUCCESSFUL eNACH charge to the loan's EMI schedule.
+ *
+ * eNACH settles 1–2 days after the debit is presented, and penalty/DPD keep accruing in that window
+ * (the daily cron keeps emi_amount current). We do NOT freeze penalty — if a mandate fails the
+ * borrower must keep accruing — so paid_date is the actual settlement date. Instead, the charge was
+ * presented with a one-day buffer, and here we accept the EMI as fully paid when the collected amount
+ * covers the (now grown) live due to within ~one day of accrual (`dueTolerance`). This tolerance is
+ * eNACH-only (system-initiated); manual/admin and gateway payments use the strict coverage check.
+ *
+ * @param {number} [dueTolerance] - One day of penalty + DPD accrual; the allowed shortfall vs the
+ *   live penalty-inclusive due when deciding "fully paid". Defaults to 0 (strict).
+ */
+async function applySuccessfulChargeToLoan({ loanApplicationId, paymentId, amount, dueTolerance = 0 }) {
   await initializeDatabase();
   const loans = await executeQuery(
     `SELECT id, status, user_id, application_number, emi_schedule, total_repayable
@@ -213,10 +225,27 @@ async function applySuccessfulChargeToLoan({ loanApplicationId, paymentId, amoun
     return { updated: false, reason: 'no_unpaid_due_emi' };
   }
 
+  const targetEmi = schedule[targetIndex];
   const chargeAmount = Number(amount) || 0;
-  schedule[targetIndex] = applyPaymentToEmi(schedule[targetIndex], chargeAmount, todayStr);
+  const prevPaid = Number(targetEmi.paid_amount || 0) || 0;
+  const newPaid = Math.round((prevPaid + chargeAmount) * 100) / 100;
+
+  // Live penalty-inclusive due (kept current by the daily loan-calculation cron). The charge was
+  // presented with a one-day buffer, so accept the EMI as fully paid when cumulative paid covers the
+  // live due to within one day of accrual; otherwise leave it pending (a genuine shortfall).
+  const liveDue = Number(targetEmi.emi_amount || targetEmi.instalment_amount || 0) || 0;
+  const tolerance = (Number(dueTolerance) || 0) + 0.5; // + rounding epsilon
+  const emiFullyPaid = liveDue <= 0 || newPaid >= liveDue - tolerance;
+
+  schedule[targetIndex] = {
+    ...targetEmi,
+    paid_amount: newPaid,
+    status: emiFullyPaid ? 'paid' : 'pending',
+    // Penalty is NOT frozen — paid_date is the actual settlement date so accrual is honest if a
+    // later (separate) charge is ever needed. Only stamp paid_date once the EMI is fully cleared.
+    paid_date: emiFullyPaid ? (targetEmi.paid_date || todayStr) : (targetEmi.paid_date || null)
+  };
   const emiNumber = targetIndex + 1;
-  const emiFullyPaid = String(schedule[targetIndex].status || '').toLowerCase() === 'paid';
 
   await executeQuery(
     `UPDATE loan_applications
@@ -248,8 +277,8 @@ async function applySuccessfulChargeToLoan({ loanApplicationId, paymentId, amoun
       amount: chargeAmount,
       emiNumber,
       bankReference,
-      // Pass the definitive paid-status from applyPaymentToEmi so the ledger type is never
-      // misclassified when emi_amount was bumped by a concurrent getLoanCalculation call.
+      // A successful eNACH charge clears the full presentation-date due, so the ledger type is
+      // always a full EMI payment — never misclassified as partial if emi_amount grew meanwhile.
       overrideEmiFullyPaid: emiFullyPaid
     });
     if (ledger.created) {

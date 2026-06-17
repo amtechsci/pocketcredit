@@ -192,6 +192,22 @@ async function calculateLoanInterestAndPenalty() {
           WHERE id = ?
         `, [newInterest, newPenalty, loan.id]);
 
+        // CRITICAL: refresh the per-EMI emi_schedule too. The query above only updates the
+        // loan-level processed_* fields; the per-EMI `emi_amount` (the penalty-inclusive amount
+        // shown on the repayment page and charged by eNACH / collected on payment) is only
+        // re-persisted by the loan-calculation engine. Without this, the displayed/charged EMI
+        // amount stays frozen at whatever DPD applied the last time someone opened the loan, so
+        // payments made days later are collected at a stale, under-penalised amount.
+        try {
+          const { computeLoanCalculationResponseData } = require('../routes/loanCalculations');
+          await computeLoanCalculationResponseData(loan.id);
+        } catch (refreshErr) {
+          await cronLogger.error(
+            `Failed to refresh emi_schedule for loan #${loan.id} (processed_* still updated)`,
+            refreshErr
+          );
+        }
+
         successCount++;
         
         if (successCount % 10 === 0) {

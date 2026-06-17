@@ -60,8 +60,14 @@ function getFirstOverdueEmi(schedule, todayStr) {
 
     // DPD >= 1 ↔ due_date is strictly before today
     if (dueDate < todayStr) {
-      // Full EMI due (use instalment_amount first; emi_amount may include dynamically-added penalty)
-      const fullDue = Number(emi.instalment_amount || emi.emi_amount || emi.amount || 0);
+      // Full EMI due = the penalty-inclusive "Total" shown on the repayment page.
+      // loanCalculations.js persists that in `emi_amount` (base EMI + penalty_total + DPD interest
+      // + GST), while `instalment_amount` is DELIBERATELY kept as the penalty-FREE base EMI so it
+      // stays stable (see loanCalculations.js ~1097-1128). eNACH must collect the full outstanding,
+      // so read `emi_amount` first and only fall back to the base instalment when it is absent.
+      // (Reading instalment_amount first was the bug: it charged base-only, e.g. ₹3,588.6 instead
+      // of the ₹4,198.68 total, which then got recorded as a part_payment.)
+      const fullDue = Number(emi.emi_amount || emi.instalment_amount || emi.amount || 0);
       // Subtract any amount already partially paid so we charge only what is still outstanding.
       // paid_amount is set in the stored emi_schedule by applyPaymentToEmi when a partial payment
       // is recorded. Charging the full amount would over-collect from the user.
@@ -84,16 +90,44 @@ function getFirstOverdueEmi(schedule, todayStr) {
 /**
  * Returns the amount to present for this EMI.
  *
- * `loanCalculations.js` persists `emi_amount` as `instalment_amount` = base EMI + penalty_total +
- * DPD interest for overdue rows (see schedule map ~1060–1108). That matches the repayment page "Total".
- * We must not add a second tier-penalty on top — that double-counted (~₹364) and inflated the Cashfree
- * charge (e.g. ₹1,500.28 → ₹1,864.97 for loan 1188).
+ * `overdueEmi.baseAmount` already holds the full outstanding for the EMI — the penalty-inclusive
+ * `emi_amount` (base EMI + penalty_total + DPD interest + GST) minus any `paid_amount` — as read by
+ * `getFirstOverdueEmi`. `getEligibleLoansForToday` refreshes penalties via the loan-calculation
+ * recompute first, so `emi_amount` is current (not stale) at charge time and matches the repayment
+ * page "Total". We must NOT add another tier-penalty on top — that would double-count.
  *
- * `penalty` is always 0: components are not stored separately on `loan_applications.emi_schedule`.
+ * `penalty` is always 0: the components are baked into emi_amount, not stored separately, so we
+ * cannot (and must not) re-derive them here.
  */
 function computePresentationAmount(overdueEmi) {
   const total = Math.round(overdueEmi.baseAmount * 100) / 100;
   return { total, penalty: 0 };
+}
+
+/**
+ * Adds `days` to a 'YYYY-MM-DD' string and returns a 'YYYY-MM-DD' string (UTC-safe).
+ */
+function addDaysToDateStr(dateStr, days) {
+  const d = new Date(`${String(dateStr).split('T')[0].split(' ')[0]}T00:00:00Z`);
+  if (isNaN(d)) return dateStr;
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Extracts an EMI's full penalty-inclusive due from a computeLoanCalculationResponseData() result.
+ * In the in-memory calc response, `instalment_amount` on each repayment.schedule row is the full
+ * due (base EMI + penalty_total + DPD interest), unlike the persisted schedule where that field is
+ * the stable base.
+ */
+function emiFullDueFromCalcData(calcData, emiNumber) {
+  const schedule = calcData && calcData.repayment && Array.isArray(calcData.repayment.schedule)
+    ? calcData.repayment.schedule
+    : [];
+  const entry = schedule.find(
+    (e) => Number(e.emi_number || e.instalment_no) === Number(emiNumber)
+  );
+  return entry ? Number(entry.instalment_amount || 0) : null;
 }
 
 // ─── DB schema setup & migration ─────────────────────────────────────────────
@@ -215,9 +249,36 @@ async function getEligibleLoansForToday(todayStr) {
   const result = [];
 
   for (const row of rows || []) {
-    const schedule = parseSchedule(row.emi_schedule);
+    let schedule = parseSchedule(row.emi_schedule);
 
-    // Find the first unpaid EMI with DPD >= 1
+    // Cheap pre-filter: only loans that already have an unpaid overdue EMI are candidates.
+    // (Penalty/DPD amounts on the stored schedule may be stale here — penalty is only baked into
+    //  emi_amount when getLoanCalculation runs — so we refresh below before computing the charge.)
+    if (!getFirstOverdueEmi(schedule, todayStr)) continue;
+
+    // Refresh penalty + DPD interest so we present the FULL current outstanding (base + penalty +
+    // DPD interest + GST) — the same "Total" shown on the repayment page — rather than a stale or
+    // base-only amount. computeLoanCalculationResponseData recomputes and PERSISTS the penalty-
+    // inclusive emi_amount (while preserving paid_amount) back into loan_applications.emi_schedule.
+    // Without this, an EMI presented before any repayment-page load is charged at the base EMI only
+    // and later shows up as a part_payment once the penalty is finally materialised.
+    try {
+      const { computeLoanCalculationResponseData } = require('../routes/loanCalculations');
+      await computeLoanCalculationResponseData(row.loan_application_id);
+      const refreshed = await executeQuery(
+        `SELECT emi_schedule FROM loan_applications WHERE id = ? LIMIT 1`,
+        [row.loan_application_id]
+      );
+      if (refreshed && refreshed[0] && refreshed[0].emi_schedule) {
+        schedule = parseSchedule(refreshed[0].emi_schedule);
+      }
+    } catch (refreshErr) {
+      console.error(
+        `[eNACH] Penalty refresh failed for loan ${row.loan_application_id} — falling back to stored amounts: ${refreshErr.message}`
+      );
+    }
+
+    // Find the first unpaid EMI with DPD >= 1 (now using the refreshed, penalty-inclusive schedule)
     const overdueEmi = getFirstOverdueEmi(schedule, todayStr);
     if (!overdueEmi) continue;
     if (!Number.isFinite(overdueEmi.baseAmount) || overdueEmi.baseAmount <= 0) continue;
@@ -227,8 +288,39 @@ async function getEligibleLoansForToday(todayStr) {
       (new Date(todayStr).getTime() - new Date(overdueEmi.dueDate).getTime()) / (1000 * 60 * 60 * 24)
     );
 
-    // Amount = stored emi_amount (already full due per loanCalculations); see computePresentationAmount
-    const { total: presentationAmount, penalty } = computePresentationAmount(overdueEmi);
+    // Today's full penalty-inclusive due for this EMI (just refreshed/persisted above).
+    const todayEmiEntry = (Array.isArray(schedule) ? schedule : []).find(
+      (e) => Number(e.emi_number || e.instalment_no) === Number(overdueEmi.emiNumber)
+    );
+    const todayFullDue = todayEmiEntry
+      ? Number(todayEmiEntry.emi_amount || todayEmiEntry.instalment_amount || 0)
+      : overdueEmi.baseAmount;
+
+    // One-day settlement buffer: eNACH settles 1–2 days after presentation while penalty/DPD keeps
+    // accruing. We present TODAY's outstanding + ONE day of accrual so the debited amount still covers
+    // the EMI when the charge settles. The buffer is the same engine's "as of tomorrow" due minus
+    // today's due (persist:false so this forward-dated what-if never touches the stored schedule).
+    let oneDayAccrual = 0;
+    try {
+      const { computeLoanCalculationResponseData } = require('../routes/loanCalculations');
+      const tomorrowStr = addDaysToDateStr(todayStr, 1);
+      const tomorrowData = await computeLoanCalculationResponseData(row.loan_application_id, {
+        recalcAsOfDate: tomorrowStr,
+        persist: false
+      });
+      const tomorrowFullDue = emiFullDueFromCalcData(tomorrowData, overdueEmi.emiNumber);
+      if (Number.isFinite(tomorrowFullDue) && Number.isFinite(todayFullDue) && tomorrowFullDue > todayFullDue) {
+        oneDayAccrual = Math.round((tomorrowFullDue - todayFullDue) * 100) / 100;
+      }
+    } catch (bufferErr) {
+      console.error(
+        `[eNACH] One-day buffer calc failed for loan ${row.loan_application_id} — presenting today's due only: ${bufferErr.message}`
+      );
+    }
+
+    // Amount = today's remaining outstanding (see computePresentationAmount) + one-day buffer.
+    const { total: baseToday, penalty } = computePresentationAmount(overdueEmi);
+    const presentationAmount = Math.round((baseToday + oneDayAccrual) * 100) / 100;
 
     result.push({
       ...row,
@@ -236,6 +328,9 @@ async function getEligibleLoansForToday(todayStr) {
         ...overdueEmi,
         amount: presentationAmount,
         penaltyAmount: penalty,
+        // One day of penalty + DPD accrual, carried so the success-side check can accept the EMI as
+        // fully paid when the live due has grown by up to a day during the settlement window.
+        dailyAccrual: oneDayAccrual,
         daysOverdue
       }
     });
@@ -298,13 +393,19 @@ async function getOrCreatePresentationRun(candidate, presentationDateStr) {
     return { skip: true, reason: `already_${existing.status.toLowerCase()}_today` };
   }
 
-  // 4. Insert a new run for today
+  // 4. Insert a new run for today.
+  // request_data carries daily_accrual so the (later) pending-recheck can apply the same one-day
+  // tolerance when crediting the settled charge against the by-then-grown live due.
+  const requestData = JSON.stringify({
+    daily_accrual: candidate.dueEmi.dailyAccrual || 0,
+    days_overdue: candidate.dueEmi.daysOverdue || 0
+  });
   const insertResult = await executeQuery(
     `INSERT INTO enach_auto_debit_runs
      (loan_application_id, user_id, db_subscription_id, subscription_id,
       emi_number, due_date, presentation_date, amount, penalty_amount,
-      status, trigger_source, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 'CRON', NOW())`,
+      status, trigger_source, request_data, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 'CRON', ?, NOW())`,
     [
       candidate.loan_application_id,
       candidate.user_id,
@@ -314,7 +415,8 @@ async function getOrCreatePresentationRun(candidate, presentationDateStr) {
       candidate.dueEmi.dueDate,
       presentationDateStr,
       candidate.dueEmi.amount,
-      candidate.dueEmi.penaltyAmount || 0
+      candidate.dueEmi.penaltyAmount || 0,
+      requestData
     ]
   );
 
@@ -433,7 +535,7 @@ async function runDueDateAutoDebit({ forceDryRun = false, forceRun = false } = {
         status: 'FAILED',
         subscriptionId: chargeResult.subscriptionId || null,
         paymentId: chargeResult.paymentId || null,
-        requestData: { amount: candidate.dueEmi.amount, penalty: candidate.dueEmi.penaltyAmount, dpd: candidate.dueEmi.daysOverdue },
+        requestData: { amount: candidate.dueEmi.amount, penalty: candidate.dueEmi.penaltyAmount, dpd: candidate.dueEmi.daysOverdue, daily_accrual: candidate.dueEmi.dailyAccrual || 0 },
         responseData: chargeResult.response || {},
         lastError: chargeResult.error || 'Charge request failed'
       });
@@ -445,14 +547,16 @@ async function runDueDateAutoDebit({ forceDryRun = false, forceRun = false } = {
       await applySuccessfulChargeToLoan({
         loanApplicationId: candidate.loan_application_id,
         paymentId: chargeResult.paymentId,
-        amount: candidate.dueEmi.amount
+        amount: candidate.dueEmi.amount,
+        // Allow up to one day of accrual shortfall vs the live due (charge carried a one-day buffer)
+        dueTolerance: candidate.dueEmi.dailyAccrual || 0
       });
       success++;
       await updateRunById(runId, {
         status: 'SUCCESS',
         subscriptionId: chargeResult.subscriptionId || null,
         paymentId: chargeResult.paymentId || null,
-        requestData: { amount: candidate.dueEmi.amount, penalty: candidate.dueEmi.penaltyAmount, dpd: candidate.dueEmi.daysOverdue },
+        requestData: { amount: candidate.dueEmi.amount, penalty: candidate.dueEmi.penaltyAmount, dpd: candidate.dueEmi.daysOverdue, daily_accrual: candidate.dueEmi.dailyAccrual || 0 },
         responseData: chargeResult.response || {}
       });
       attemptedDetails.push({ ...detail, status: 'SUCCESS', paymentId: chargeResult.paymentId });
@@ -463,7 +567,7 @@ async function runDueDateAutoDebit({ forceDryRun = false, forceRun = false } = {
         status: 'PENDING',
         subscriptionId: chargeResult.subscriptionId || null,
         paymentId: chargeResult.paymentId || null,
-        requestData: { amount: candidate.dueEmi.amount, penalty: candidate.dueEmi.penaltyAmount, dpd: candidate.dueEmi.daysOverdue },
+        requestData: { amount: candidate.dueEmi.amount, penalty: candidate.dueEmi.penaltyAmount, dpd: candidate.dueEmi.daysOverdue, daily_accrual: candidate.dueEmi.dailyAccrual || 0 },
         responseData: chargeResult.response || {}
       });
       attemptedDetails.push({ ...detail, status: 'PENDING', paymentId: chargeResult.paymentId });
@@ -525,10 +629,21 @@ async function recheckPendingAutoDebitCharges({ forceRun = false } = {}) {
       const paymentStatus = String(payment.payment_status || '').toUpperCase();
 
       if (paymentStatus === 'SUCCESS') {
+        // This charge was presented 1–2 days ago with a one-day buffer; allow the same one-day
+        // accrual tolerance now that the live due may have grown during the settlement window.
+        let runDailyAccrual = 0;
+        try {
+          const rd = run.request_data
+            ? (typeof run.request_data === 'string' ? JSON.parse(run.request_data) : run.request_data)
+            : null;
+          runDailyAccrual = Number(rd && rd.daily_accrual) || 0;
+        } catch (_) { /* no stored accrual → strict coverage */ }
+
         await applySuccessfulChargeToLoan({
           loanApplicationId: run.loan_application_id,
           paymentId: run.payment_id,
-          amount: run.amount
+          amount: run.amount,
+          dueTolerance: runDailyAccrual
         });
         await executeQuery(
           `UPDATE enach_auto_debit_runs

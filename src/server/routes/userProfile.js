@@ -2854,6 +2854,59 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
       }
     }
 
+    // Full Payment must cover the CURRENT outstanding (penalty + DPD inclusive). A "settlement"
+    // may legitimately close the loan for less, so it is intentionally NOT validated here.
+    // Validated BEFORE the insert so a short amount is rejected without leaving an orphan row.
+    if (txType === 'full_payment' && loan_application_id) {
+      const loanIdInt = parseInt(loan_application_id);
+      // Refresh penalty/DPD so we compare against the live due, not a stale (lower) figure.
+      try {
+        const { computeLoanCalculationResponseData } = require('./loanCalculations');
+        await computeLoanCalculationResponseData(loanIdInt);
+      } catch (refreshErr) {
+        console.error(`⚠️ Could not refresh loan #${loanIdInt} before full_payment validation (using stored amounts):`, refreshErr.message);
+      }
+
+      const fpLoans = await executeQuery(
+        'SELECT emi_schedule, total_repayable, status FROM loan_applications WHERE id = ?',
+        [loanIdInt]
+      );
+      if (fpLoans.length > 0 && String(fpLoans[0].status || '').toLowerCase() !== 'cleared') {
+        let outstanding = 0;
+        try {
+          const sched = typeof fpLoans[0].emi_schedule === 'string'
+            ? JSON.parse(fpLoans[0].emi_schedule)
+            : fpLoans[0].emi_schedule;
+          if (Array.isArray(sched) && sched.length > 0) {
+            for (const emi of sched) {
+              if (String(emi.status || '').toLowerCase() === 'paid') continue;
+              const due = parseFloat(emi.emi_amount || emi.instalment_amount || 0) || 0;
+              const paidSoFar = parseFloat(emi.paid_amount || 0) || 0;
+              outstanding += Math.max(0, due - paidSoFar);
+            }
+          } else {
+            outstanding = parseFloat(fpLoans[0].total_repayable) || 0;
+          }
+        } catch (e) {
+          outstanding = parseFloat(fpLoans[0].total_repayable) || 0;
+        }
+        outstanding = Math.round(outstanding * 100) / 100;
+
+        const paymentAmount = parseFloat(amount) || 0;
+        if (paymentAmount < outstanding - 1.0) {
+          return res.status(400).json({
+            status: 'error',
+            message: `Full payment of ₹${paymentAmount.toFixed(2)} does not cover the outstanding ₹${outstanding.toFixed(2)} (shortfall ₹${(outstanding - paymentAmount).toFixed(2)}). Use a Settlement transaction to close the loan for a reduced amount.`,
+            data: {
+              entered_amount: paymentAmount,
+              outstanding,
+              shortfall: Math.round((outstanding - paymentAmount) * 100) / 100
+            }
+          });
+        }
+      }
+    }
+
     // Insert transaction into database
     const query = `
       INSERT INTO transactions (
@@ -3503,7 +3556,10 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
         if (loan.user_id == userIdInt || loan.user_id == userId) {
           console.log(`✅ Loan ownership confirmed. Current status: ${loan.status}`);
 
-          const closedAmount = parseFloat(loan.total_repayable) || 0;
+          // closed_amount reflects the ACTUAL amount paid/settled, not total_repayable. For
+          // full_payment this was validated (above) to cover the outstanding; for a settlement it
+          // may be a negotiated lower amount — recording the real figure keeps closure accurate.
+          const closedAmount = parseFloat(amount) || 0;
           // Use the transaction date chosen by admin as the loan closed date
           const closedDate = txDate;
           let updateSet = `status = 'cleared', closed_date = ?, closed_amount = ?, updated_at = NOW()`;
@@ -3512,7 +3568,7 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
             try {
               let emiArr = typeof loan.emi_schedule === 'string' ? JSON.parse(loan.emi_schedule) : loan.emi_schedule;
               if (Array.isArray(emiArr) && emiArr.length > 0) {
-                emiArr = emiArr.map(emi => ({ ...emi, status: 'paid', paid_date: closedDate }));
+                emiArr = emiArr.map(emi => ({ ...emi, status: 'paid', paid_date: emi.paid_date || closedDate }));
                 updateSet = `emi_schedule = ?, status = 'cleared', closed_date = ?, closed_amount = ?, updated_at = NOW()`;
                 updateParams = [JSON.stringify(emiArr), closedDate, closedAmount, loanIdInt];
               }
@@ -3724,6 +3780,16 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
       const userIdInt = parseInt(userId);
 
       console.log(`💳 Processing EMI payment for loan #${loanIdInt}, user #${userIdInt}`);
+
+      // Refresh penalty + DPD into emi_schedule BEFORE reading it, so the EMI's `emi_amount`
+      // reflects the due as of today. Otherwise a payment recorded days after the amount was
+      // last calculated would be compared against (and could falsely clear) a stale, lower due.
+      try {
+        const { computeLoanCalculationResponseData } = require('./loanCalculations');
+        await computeLoanCalculationResponseData(loanIdInt);
+      } catch (refreshErr) {
+        console.error(`⚠️ Could not refresh loan #${loanIdInt} calc before EMI payment (using stored amounts):`, refreshErr.message);
+      }
 
       const loans = await executeQuery(
         'SELECT id, user_id, status, application_number, emi_schedule, plan_snapshot, total_repayable FROM loan_applications WHERE id = ?',

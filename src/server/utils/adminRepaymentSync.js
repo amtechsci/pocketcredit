@@ -186,8 +186,14 @@ function resolvePaymentTypeForAdminTransaction(txType, emiNumber) {
 }
 
 /**
- * Admin manual EMI payment is authoritative — always mark the target EMI paid.
+ * Apply an admin-recorded EMI payment to the schedule. The EMI is marked fully paid only when the
+ * recorded amount covers the current penalty-inclusive due; a short amount stays partial so the
+ * outstanding balance is not hidden.
  */
+// Tolerance (in ₹) for treating a payment as fully covering an EMI's current due. Differences
+// within this band are rounding; larger gaps are genuine shortfalls and must stay partial.
+const EMI_PAYMENT_ROUNDING_TOLERANCE = 1.0;
+
 function markAdminEmiPaidInSchedule(emiScheduleRaw, emiNumber, paymentAmount, paidDate) {
   const schedule = parseEmiSchedule(emiScheduleRaw);
   if (!schedule || emiNumber == null || emiNumber < 1 || schedule.length < emiNumber) {
@@ -204,9 +210,17 @@ function markAdminEmiPaidInSchedule(emiScheduleRaw, emiNumber, paymentAmount, pa
     baseInstalment = parseFloat(emi.emi_amount || 0) || paid;
   }
 
+  // Only mark fully paid when the recorded amount covers the current penalty-inclusive due
+  // (emi_amount). A short manual entry — e.g. an amount quoted earlier and paid days later
+  // after more penalty/DPD accrued — leaves the EMI pending so the shortfall stays visible
+  // instead of the EMI being falsely shown as fully cleared.
+  const due = parseFloat(emi.emi_amount || emi.instalment_amount || 0) || 0;
+  const alreadyPaid = String(emi.status || '').toLowerCase() === 'paid';
+  const fullyPaid = alreadyPaid || due <= 0 || paid >= due - EMI_PAYMENT_ROUNDING_TOLERANCE;
+
   schedule[idx] = {
     ...emi,
-    status: 'paid',
+    status: fullyPaid ? 'paid' : 'pending',
     paid_date: date,
     paid_amount: paid,
     instalment_amount: parseFloat(baseInstalment) || paid
@@ -216,7 +230,7 @@ function markAdminEmiPaidInSchedule(emiScheduleRaw, emiNumber, paymentAmount, pa
     updated: true,
     emiScheduleArray: schedule,
     emiNumber,
-    emiFullyPaid: true
+    emiFullyPaid: fullyPaid
   };
 }
 

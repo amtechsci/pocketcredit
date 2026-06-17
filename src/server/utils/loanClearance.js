@@ -5,6 +5,11 @@
 
 const AMOUNT_TOLERANCE = 0.01;
 
+// Tolerance (in ₹) for deciding whether a payment fully covers an EMI's current due.
+// Differences within this band are treated as rounding; anything larger is a genuine
+// shortfall and the EMI must stay partially paid (not silently marked fully paid).
+const PAYMENT_ROUNDING_TOLERANCE = 1.0;
+
 const ACTIVE_REPAYMENT_STATUSES = ['account_manager', 'overdue', 'default', 'delinquent'];
 
 const REPAYMENT_TRANSACTION_TYPES = [
@@ -175,7 +180,13 @@ function markEmiPaidInSchedule(emiScheduleRaw, emiNumber, paymentAmount, paidDat
   return { updated: true, emiScheduleArray: schedule, emiFullyPaid };
 }
 
-/** Gateway / successful Cashfree EMI — order amount is authoritative (incl. penalty). */
+/**
+ * Gateway / successful Cashfree EMI.
+ * Marks the EMI fully paid ONLY when the amount covers the current penalty-inclusive due
+ * (`emi_amount`). If the amount falls short — e.g. a stale/quoted figure paid days later after
+ * more penalty + DPD interest accrued — the EMI stays pending with the partial recorded, so the
+ * outstanding balance is never silently hidden.
+ */
 function markGatewayEmiPaidInSchedule(emiScheduleRaw, emiNumber, paymentAmount, paidDate) {
   const schedule = parseEmiSchedule(emiScheduleRaw);
   if (!schedule || emiNumber == null || emiNumber < 1 || schedule.length < emiNumber) {
@@ -192,15 +203,20 @@ function markGatewayEmiPaidInSchedule(emiScheduleRaw, emiNumber, paymentAmount, 
     baseInstalment = parseFloat(emi.emi_amount || 0) || paid;
   }
 
+  // Current full due = penalty-inclusive emi_amount (kept fresh by the calc engine / daily cron).
+  const due = parseFloat(emi.emi_amount || emi.instalment_amount || 0) || 0;
+  const alreadyPaid = String(emi.status || '').toLowerCase() === 'paid';
+  const fullyPaid = alreadyPaid || due <= 0 || paid >= due - PAYMENT_ROUNDING_TOLERANCE;
+
   schedule[idx] = {
     ...emi,
-    status: 'paid',
+    status: fullyPaid ? 'paid' : 'pending',
     paid_date: date,
     paid_amount: paid,
     instalment_amount: parseFloat(baseInstalment) || paid
   };
 
-  return { updated: true, emiScheduleArray: schedule, emiFullyPaid: true };
+  return { updated: true, emiScheduleArray: schedule, emiFullyPaid: fullyPaid };
 }
 
 /** Only notify customer when schedule was persisted, this EMI is fully paid, and loan is not fully cleared yet. */
