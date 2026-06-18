@@ -1690,7 +1690,20 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                                         emiPaidLate = txDateStr > emiDueDateStr;
                                     }
                                 }
-                                const base = parseFloat(emiEntry.emi_amount || 0);
+                                // instalment_amount is the original scheduled base (principal + interest + fees)
+                                // preserved by loanCalculations.js exactly so it stays stable for eNACH.
+                                // emi_amount is the penalty-inclusive display value (base + penalty_total + DPD)
+                                // and must NOT be used here — it would double-count DPD in emiBaseFromSchedule.
+                                // Fall back to emi_amount only when instalment_amount is absent (old records);
+                                // in that case subtract any stored DPD/penalty components to recover the base.
+                                let base;
+                                if (emiEntry.instalment_amount != null) {
+                                    base = parseFloat(emiEntry.instalment_amount) || 0;
+                                } else {
+                                    const storedDpd = parseFloat(emiEntry.dpd_interest_on_total_principal || emiEntry.dpd_interest || 0) || 0;
+                                    const storedPenT = parseFloat(emiEntry.penalty_total || 0) || 0;
+                                    base = Math.max(0, (parseFloat(emiEntry.emi_amount || 0) || 0) - storedDpd - storedPenT);
+                                }
                                 // Use stored dpd_interest if available; otherwise compute it using
                                 // the same formula as loanCalculations.js (only when actually late).
                                 let dpdInterest = parseFloat(
@@ -1720,7 +1733,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                     if (emiPaidLate) {
                         let residualAfter = null;
                         if (emiBaseFromSchedule != null) {
-                            // Primary: use stored base EMI amount — exactly what payment.js charged without penalty
+                            // residualAfter = repayment - (base_EMI + DPD); positive residual = penalty+GST
                             residualAfter = toDecimal2(repayment_amt - emiBaseFromSchedule);
                         } else {
                             // Fallback: reconstruct from formula when emi_schedule base is unavailable
