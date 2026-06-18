@@ -786,11 +786,82 @@ const getEmiPrincipalPortionForBs = (row, emiNum) => {
     plan = plan || {};
     const emiCount = parseInt(plan.emi_count, 10) || 1;
     if (emiNum < 1 || emiNum > emiCount || emiCount <= 1) return null;
-    const processedAmount = parseFloat(row.processed_amount || row.principal_amount || 0);
-    if (!(processedAmount > 0)) return null;
-    const principalPerEmi = toDecimal2(Math.floor((processedAmount / emiCount) * 100) / 100);
-    const remainder = toDecimal2(processedAmount - principalPerEmi * emiCount);
+    const principalBase = parseFloat(row.principal_amount || row.loan_amount || row.processed_amount || 0);
+    if (!(principalBase > 0)) return null;
+    const principalPerEmi = toDecimal2(Math.floor((principalBase / emiCount) * 100) / 100);
+    const remainder = toDecimal2(principalBase - principalPerEmi * emiCount);
     return emiNum === emiCount ? toDecimal2(principalPerEmi + remainder) : principalPerEmi;
+};
+
+/**
+ * Per-EMI components for BS report: prefer stored emi_schedule fields (same source as loanCalculations),
+ * fall back to buildEmiBreakdownMap / principal split.
+ */
+const resolveBsEmiScheduleComponents = (emiEntry, row, emiNum, bd) => {
+    let principal = null;
+    let interest = null;
+    let postFee = null;
+    let postGst = null;
+
+    if (emiEntry) {
+        if (emiEntry.principal != null && !Number.isNaN(parseFloat(emiEntry.principal))) {
+            principal = toDecimal2(parseFloat(emiEntry.principal));
+        }
+        if (emiEntry.interest != null && !Number.isNaN(parseFloat(emiEntry.interest))) {
+            interest = toDecimal2(parseFloat(emiEntry.interest));
+        }
+        if (emiEntry.post_service_fee != null && !Number.isNaN(parseFloat(emiEntry.post_service_fee))) {
+            postFee = toDecimal2(parseFloat(emiEntry.post_service_fee));
+        }
+        if (emiEntry.gst_on_post_service_fee != null && !Number.isNaN(parseFloat(emiEntry.gst_on_post_service_fee))) {
+            postGst = toDecimal2(parseFloat(emiEntry.gst_on_post_service_fee));
+        }
+    }
+
+    const principalPortion = getEmiPrincipalPortionForBs(row, emiNum);
+    if (principal == null && principalPortion != null) principal = principalPortion;
+    if (interest == null && bd) interest = toDecimal2(bd.interest);
+    if (postFee == null && bd) postFee = toDecimal2(bd.postFee);
+    if (postGst == null && bd) postGst = toDecimal2(bd.postGst);
+
+    return {
+        principal: principal || 0,
+        interest: interest || 0,
+        postFee: postFee || 0,
+        postGst: postGst || 0
+    };
+};
+
+/**
+ * Scheduled base EMI (principal + interest + post-service fee + GST) for waterfall allocation.
+ * instalment_amount from emi_schedule is authoritative when present; strip stored DPD/penalty if polluted.
+ */
+const resolveBsEmiBaseAmount = (emiEntry, row, emiNum, bd) => {
+    const parts = resolveBsEmiScheduleComponents(emiEntry, row, emiNum, bd);
+    const fromParts = toDecimal2(parts.principal + parts.interest + parts.postFee + parts.postGst);
+
+    if (fromParts > 0 && emiEntry && (emiEntry.principal != null || emiEntry.interest != null)) {
+        return fromParts;
+    }
+
+    if (emiEntry?.instalment_amount != null) {
+        let stored = parseFloat(emiEntry.instalment_amount) || 0;
+        if (stored > 0) {
+            const penT = parseFloat(emiEntry.penalty_total || 0) || 0;
+            const dpd = parseFloat(
+                emiEntry.dpd_interest_on_total_principal || emiEntry.dpd_interest || 0
+            ) || 0;
+            if (penT > 0 || dpd > 0) {
+                const stripped = toDecimal2(stored - penT - dpd);
+                if (stripped > 0 && (fromParts <= 0 || Math.abs(stripped - fromParts) <= Math.abs(stored - fromParts) + 1)) {
+                    stored = stripped;
+                }
+            }
+            return toDecimal2(stored);
+        }
+    }
+
+    return fromParts > 0 ? fromParts : 0;
 };
 
 /**
@@ -809,7 +880,7 @@ const buildEmiBreakdownMap = (loanRow, fullCalc) => {
     }
     plan = plan || {};
     const emiCount = parseInt(plan.emi_count, 10) || 1;
-    const processedAmount = parseFloat(loanRow.processed_amount || loanRow.loan_amount || 0);
+    const processedAmount = parseFloat(loanRow.loan_amount || loanRow.processed_amount || 0);
     const rate = clampDailyInterestRateForBsReport(loanRow.interest_percent_per_day);
 
     let repayFeePerEmi = 0;
@@ -845,7 +916,7 @@ const buildEmiBreakdownMap = (loanRow, fullCalc) => {
 
     const principalPerEmi = toDecimal2(Math.floor((processedAmount / emiCount) * 100) / 100);
     const remainder = toDecimal2(processedAmount - principalPerEmi * emiCount);
-    const baseDateStr = parseDateToString(loanRow.processed_at);
+    const baseDateStr = parseDateToString(loanRow.processed_at || loanRow.disbursed_at);
     if (!baseDateStr) {
         for (let k = 1; k <= emiCount; k++) {
             map.set(k, { interest: 0, postFee: repayFeePerEmi, postGst: repayGstPerEmi });
@@ -855,14 +926,15 @@ const buildEmiBreakdownMap = (loanRow, fullCalc) => {
 
     let outstandingPrincipal = processedAmount;
     for (let i = 0; i < emiCount; i++) {
-        const emiDateStr = String(sched[i].due_date || '').slice(0, 10);
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(emiDateStr)) continue;
+        const emiDateStr = parseDateToString(sched[i].due_date);
+        if (!emiDateStr || !/^\d{4}-\d{2}-\d{2}$/.test(emiDateStr)) continue;
 
         let previousDateStr;
         if (i === 0) {
             previousDateStr = baseDateStr;
         } else {
-            const prevStr = String(sched[i - 1].due_date || '').slice(0, 10);
+            const prevStr = parseDateToString(sched[i - 1].due_date);
+            if (!prevStr || !/^\d{4}-\d{2}-\d{2}$/.test(prevStr)) continue;
             const [py, pm, pd] = prevStr.split('-').map(Number);
             const prevDueDate = new Date(py, pm - 1, pd);
             prevDueDate.setDate(prevDueDate.getDate() + 1);
@@ -1599,7 +1671,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
             try {
                 const fullCalc = await getFullLoanCalculation(lid);
                 const [loanRow] = await executeQuery(
-                    `SELECT id, loan_amount, processed_amount, processed_at, plan_snapshot, emi_schedule, interest_percent_per_day
+                    `SELECT id, loan_amount, disbursal_amount, processed_at, disbursed_at, plan_snapshot, emi_schedule, interest_percent_per_day
                      FROM loan_applications WHERE id = ?`,
                     [lid]
                 );
@@ -1656,46 +1728,50 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
             if (emiNum != null) {
                 const bdMap = emiBreakdownByLoan.get(row.lid);
                 const bd = bdMap?.get(emiNum);
-                if (bd) {
-                    interest_collected = bd.interest;
-                    post_service_fee_ex_gst = toDecimal2(bd.postFee);
-                    post_service_fee_gst = toDecimal2(bd.postGst);
+
+                let emiEntry = null;
+                if (row.emi_schedule) {
+                    try {
+                        const sched = typeof row.emi_schedule === 'string'
+                            ? JSON.parse(row.emi_schedule)
+                            : row.emi_schedule;
+                        if (Array.isArray(sched) && sched[emiNum - 1]) {
+                            emiEntry = sched[emiNum - 1];
+                        }
+                    } catch (e) { /* ignore parse errors */ }
                 }
-                // The emi_schedule block is used ONLY to determine emiPaidLate and dpdInterest.
-                // The base EMI (principal + interest + fees) is reconstructed from the already-resolved
-                // bd-sourced components (interest_collected, post_service_fee_*) and getEmiPrincipalPortionForBs,
-                // which all use la.disbursal_amount as the principal — avoiding any dependency on
-                // instalment_amount / emi_amount, which can be stale or penalty-inclusive in older records.
-                if (bd) {
+
+                const emiParts = resolveBsEmiScheduleComponents(emiEntry, row, emiNum, bd);
+                interest_collected = emiParts.interest;
+                post_service_fee_ex_gst = emiParts.postFee;
+                post_service_fee_gst = emiParts.postGst;
+                if (emiEntry?.instalment_amount != null && emiEntry.interest == null) {
+                    const baseFromSchedule = resolveBsEmiBaseAmount(emiEntry, row, emiNum, bd);
+                    const impliedInterest = toDecimal2(
+                        baseFromSchedule - emiParts.principal - emiParts.postFee - emiParts.postGst
+                    );
+                    if (impliedInterest >= 0) {
+                        interest_collected = impliedInterest;
+                    }
+                }
+
+                if (bd || emiEntry) {
                     let emiPaidLate = false;
                     let emiDueDateStr = null;
                     let dpdInterest = 0;
 
-                    if (row.emi_schedule) {
-                        try {
-                            const sched = typeof row.emi_schedule === 'string'
-                                ? JSON.parse(row.emi_schedule)
-                                : row.emi_schedule;
-                            if (Array.isArray(sched) && sched[emiNum - 1]) {
-                                const emiEntry = sched[emiNum - 1];
-                                if (emiEntry.due_date && row.transaction_date) {
-                                    // parseDateToString handles both Date objects (mysql2 driver returns
-                                    // Date objects for DATETIME columns) and YYYY-MM-DD strings safely.
-                                    // String(dateObj).slice(0,10) would produce "Mon Apr 07" which breaks
-                                    // both the > comparison and calculateDaysBetween's YYYY-MM-DD parser.
-                                    emiDueDateStr = parseDateToString(emiEntry.due_date);
-                                    const txDateStr = parseDateToString(row.transaction_date);
-                                    if (emiDueDateStr && txDateStr) {
-                                        emiPaidLate = txDateStr > emiDueDateStr;
-                                    }
-                                }
-                                // Prefer stored DPD; formula fallback runs below when this is 0.
-                                dpdInterest = parseFloat(
-                                    emiEntry.dpd_interest_on_total_principal ||
-                                    emiEntry.dpd_interest || 0
-                                ) || 0;
+                    if (emiEntry) {
+                        if (emiEntry.due_date && row.transaction_date) {
+                            emiDueDateStr = parseDateToString(emiEntry.due_date);
+                            const txDateStr = parseDateToString(row.transaction_date);
+                            if (emiDueDateStr && txDateStr) {
+                                emiPaidLate = txDateStr > emiDueDateStr;
                             }
-                        } catch (e) { /* ignore parse errors */ }
+                        }
+                        dpdInterest = parseFloat(
+                            emiEntry.dpd_interest_on_total_principal ||
+                            emiEntry.dpd_interest || 0
+                        ) || 0;
                     }
 
                     // Compute DPD via the same formula as loanCalculations.js when not stored.
@@ -1711,33 +1787,20 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                     }
 
                     // Waterfall allocation of the ACTUAL repayment amount, in priority order:
-                    //   1. base EMI    = principal + interest + post-service fee + its GST
-                    //   2. PENAL INTEREST (DPD) — filled next, capped at whatever remains after base
-                    //   3. PENALTY + GST on PENALTY — whatever remains after base + DPD (split via ÷1.18)
-                    // This means when a borrower was charged LESS than the full due, DPD/penalty are
-                    // not overstated: each bucket only ever shows what the repayment actually covers.
-                    // interest_collected and post_service_fee_* were set from bd (buildEmiBreakdownMap) above.
-                    // getEmiPrincipalPortionForBs uses la.disbursal_amount (row.processed_amount alias).
+                    //   1. base EMI    = instalment_amount / schedule components (principal+interest+fees)
+                    //   2. PENAL INTEREST (DPD) — capped at whatever remains after base
+                    //   3. PENALTY + GST on PENALTY — whatever remains after base + DPD
                     if (emiPaidLate) {
-                        const principalPortion = getEmiPrincipalPortionForBs(row, emiNum) || 0;
-                        const baseEmi = toDecimal2(
-                            principalPortion +
-                            interest_collected +
-                            post_service_fee_ex_gst +
-                            post_service_fee_gst
-                        );
+                        const baseEmi = resolveBsEmiBaseAmount(emiEntry, row, emiNum, bd);
 
-                        // Remaining after the base EMI is consumed (never negative).
                         let remaining = toDecimal2(Math.max(0, repayment_amt - baseEmi));
 
-                        // DPD bucket: take the lesser of the computed DPD and what's left.
                         const dpdApplied = toDecimal2(Math.min(Math.max(0, dpdInterest), remaining));
                         if (dpdApplied > 0.001) {
                             penal_interest_dpd = dpdApplied;
                         }
                         remaining = toDecimal2(remaining - dpdApplied);
 
-                        // Penalty bucket: whatever is still left is penalty (incl. GST), split via ÷1.18.
                         if (remaining > 0.02) {
                             penalty = toDecimal2(remaining / GST_FACTOR);
                             gst_on_penalty = toDecimal2(penalty * GST_RATE);
