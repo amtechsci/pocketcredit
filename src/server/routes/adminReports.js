@@ -1690,19 +1690,36 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                                         emiPaidLate = txDateStr > emiDueDateStr;
                                     }
                                 }
-                                // instalment_amount is the original scheduled base (principal + interest + fees)
-                                // preserved by loanCalculations.js exactly so it stays stable for eNACH.
-                                // emi_amount is the penalty-inclusive display value (base + penalty_total + DPD)
-                                // and must NOT be used here — it would double-count DPD in emiBaseFromSchedule.
-                                // Fall back to emi_amount only when instalment_amount is absent (old records);
-                                // in that case subtract any stored DPD/penalty components to recover the base.
+                                // Compute the original base EMI (principal + interest + fees, no DPD/penalty).
+                                // Priority order — most reliable first:
+                                //  1. instalment_amount  — explicitly preserved as stable base by loanCalculations.js
+                                //     (emi_amount must NOT be used — it is the penalty-inclusive display value
+                                //      base + penalty_total + DPD, so adding dpdInterest again would double-count)
+                                //  2. Recomputed from bd (fresh, schedule-independent) — safe for old records
+                                //  3. emi_amount minus stored DPD/penalty components — last resort for very old records
                                 let base;
                                 if (emiEntry.instalment_amount != null) {
+                                    // Modern loans: instalment_amount is the original base preserved by loanCalc
                                     base = parseFloat(emiEntry.instalment_amount) || 0;
                                 } else {
-                                    const storedDpd = parseFloat(emiEntry.dpd_interest_on_total_principal || emiEntry.dpd_interest || 0) || 0;
-                                    const storedPenT = parseFloat(emiEntry.penalty_total || 0) || 0;
-                                    base = Math.max(0, (parseFloat(emiEntry.emi_amount || 0) || 0) - storedDpd - storedPenT);
+                                    // Old records: reconstruct base from the already-computed bd breakdown.
+                                    // bd.interest + bd.postFee + bd.postGst come from buildEmiBreakdownMap
+                                    // which recalculates fresh from the loan data, independent of emi_schedule state.
+                                    const principalPortion = getEmiPrincipalPortionForBs(row, emiNum) || 0;
+                                    const computedBase = toDecimal2(
+                                        principalPortion +
+                                        (bd.interest || 0) +
+                                        (bd.postFee || 0) +
+                                        (bd.postGst || 0)
+                                    );
+                                    if (computedBase > 0) {
+                                        base = computedBase;
+                                    } else {
+                                        // Absolute fallback: subtract stored DPD + penalty from emi_amount
+                                        const storedDpd = parseFloat(emiEntry.dpd_interest_on_total_principal || emiEntry.dpd_interest || 0) || 0;
+                                        const storedPenT = parseFloat(emiEntry.penalty_total || 0) || 0;
+                                        base = Math.max(0, (parseFloat(emiEntry.emi_amount || 0) || 0) - storedDpd - storedPenT);
+                                    }
                                 }
                                 // Use stored dpd_interest if available; otherwise compute it using
                                 // the same formula as loanCalculations.js (only when actually late).
@@ -1736,7 +1753,8 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                             // residualAfter = repayment - (base_EMI + DPD); positive residual = penalty+GST
                             residualAfter = toDecimal2(repayment_amt - emiBaseFromSchedule);
                         } else {
-                            // Fallback: reconstruct from formula when emi_schedule base is unavailable
+                            // Last-resort fallback: emiBaseFromSchedule could not be determined.
+                            // Reconstruct base from formula and subtract DPD so only the penalty portion remains.
                             const principalEmi = getEmiPrincipalPortionForBs(row, emiNum);
                             if (principalEmi != null) {
                                 residualAfter = toDecimal2(
@@ -1744,7 +1762,8 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                                         principalEmi -
                                         interest_collected -
                                         post_service_fee_ex_gst -
-                                        post_service_fee_gst
+                                        post_service_fee_gst -
+                                        dpdInterest
                                 );
                             }
                         }
