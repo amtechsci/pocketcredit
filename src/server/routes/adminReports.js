@@ -834,17 +834,20 @@ const resolveBsEmiScheduleComponents = (emiEntry, row, emiNum, bd) => {
 
 /**
  * Scheduled base EMI (principal + interest + post-service fee + GST) for waterfall allocation.
- * instalment_amount from emi_schedule is authoritative when present; strip stored DPD/penalty if polluted.
+ * instalment_amount is used only when it is clearly the original scheduled base (strictly less than
+ * the actual repayment). When it equals the repayment it was polluted by markAdminEmiPaidInSchedule
+ * falling back to emi_amount / paid amount — ignore it and use component sum instead.
  */
-const resolveBsEmiBaseAmount = (emiEntry, row, emiNum, bd) => {
+const resolveBsEmiBaseAmount = (emiEntry, row, emiNum, bd, repaymentAmt) => {
     const parts = resolveBsEmiScheduleComponents(emiEntry, row, emiNum, bd);
     const fromParts = toDecimal2(parts.principal + parts.interest + parts.postFee + parts.postGst);
+    const repayment = parseFloat(repaymentAmt) || 0;
 
     if (fromParts > 0 && emiEntry && (emiEntry.principal != null || emiEntry.interest != null)) {
-        return fromParts;
+        return { base: fromParts, usedInstalment: false };
     }
 
-    if (emiEntry?.instalment_amount != null) {
+    if (emiEntry?.instalment_amount != null && repayment > 0) {
         let stored = parseFloat(emiEntry.instalment_amount) || 0;
         if (stored > 0) {
             const penT = parseFloat(emiEntry.penalty_total || 0) || 0;
@@ -853,15 +856,19 @@ const resolveBsEmiBaseAmount = (emiEntry, row, emiNum, bd) => {
             ) || 0;
             if (penT > 0 || dpd > 0) {
                 const stripped = toDecimal2(stored - penT - dpd);
-                if (stripped > 0 && (fromParts <= 0 || Math.abs(stripped - fromParts) <= Math.abs(stored - fromParts) + 1)) {
+                if (stripped > 0 && stripped < stored) {
                     stored = stripped;
                 }
             }
-            return toDecimal2(stored);
+            // Only trust instalment_amount when it is strictly below what was collected —
+            // otherwise it is the full payment / penalty-inclusive emi_amount, not the base.
+            if (stored > 0 && stored < repayment - 0.02) {
+                return { base: toDecimal2(stored), usedInstalment: true };
+            }
         }
     }
 
-    return fromParts > 0 ? fromParts : 0;
+    return { base: fromParts > 0 ? fromParts : 0, usedInstalment: false };
 };
 
 /**
@@ -945,7 +952,11 @@ const buildEmiBreakdownMap = (loanRow, fullCalc) => {
         const daysForPeriod = calculateDaysBetween(previousDateStr, emiDateStr);
         const principalForThisEmi =
             i === emiCount - 1 ? toDecimal2(principalPerEmi + remainder) : principalPerEmi;
-        const interestForPeriod = toDecimal2(outstandingPrincipal * rate * daysForPeriod);
+        let interestForPeriod = toDecimal2(outstandingPrincipal * rate * daysForPeriod);
+        const storedEntry = sched[i];
+        if (storedEntry?.interest != null && !Number.isNaN(parseFloat(storedEntry.interest))) {
+            interestForPeriod = toDecimal2(parseFloat(storedEntry.interest));
+        }
         outstandingPrincipal = toDecimal2(outstandingPrincipal - principalForThisEmi);
 
         map.set(i + 1, {
@@ -1745,15 +1756,6 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 interest_collected = emiParts.interest;
                 post_service_fee_ex_gst = emiParts.postFee;
                 post_service_fee_gst = emiParts.postGst;
-                if (emiEntry?.instalment_amount != null && emiEntry.interest == null) {
-                    const baseFromSchedule = resolveBsEmiBaseAmount(emiEntry, row, emiNum, bd);
-                    const impliedInterest = toDecimal2(
-                        baseFromSchedule - emiParts.principal - emiParts.postFee - emiParts.postGst
-                    );
-                    if (impliedInterest >= 0) {
-                        interest_collected = impliedInterest;
-                    }
-                }
 
                 if (bd || emiEntry) {
                     let emiPaidLate = false;
@@ -1791,7 +1793,20 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                     //   2. PENAL INTEREST (DPD) — capped at whatever remains after base
                     //   3. PENALTY + GST on PENALTY — whatever remains after base + DPD
                     if (emiPaidLate) {
-                        const baseEmi = resolveBsEmiBaseAmount(emiEntry, row, emiNum, bd);
+                        const { base: baseEmi, usedInstalment } = resolveBsEmiBaseAmount(
+                            emiEntry, row, emiNum, bd, repayment_amt
+                        );
+
+                        // When instalment_amount is the genuine scheduled base but interest field
+                        // is absent, derive interest so the column matches the base breakdown.
+                        if (usedInstalment && emiEntry?.interest == null && baseEmi > 0) {
+                            const impliedInterest = toDecimal2(
+                                baseEmi - emiParts.principal - emiParts.postFee - emiParts.postGst
+                            );
+                            if (impliedInterest >= 0) {
+                                interest_collected = impliedInterest;
+                            }
+                        }
 
                         let remaining = toDecimal2(Math.max(0, repayment_amt - baseEmi));
 
