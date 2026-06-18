@@ -1710,29 +1710,37 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                         }
                     }
 
-                    if (emiPaidLate && dpdInterest > 0.001) {
-                        penal_interest_dpd = toDecimal2(dpdInterest);
-                    }
-
-                    // Reconstruct the expected payment (base + DPD) from reliable, schedule-independent sources.
+                    // Waterfall allocation of the ACTUAL repayment amount, in priority order:
+                    //   1. base EMI    = principal + interest + post-service fee + its GST
+                    //   2. PENAL INTEREST (DPD) — filled next, capped at whatever remains after base
+                    //   3. PENALTY + GST on PENALTY — whatever remains after base + DPD (split via ÷1.18)
+                    // This means when a borrower was charged LESS than the full due, DPD/penalty are
+                    // not overstated: each bucket only ever shows what the repayment actually covers.
                     // interest_collected and post_service_fee_* were set from bd (buildEmiBreakdownMap) above.
                     // getEmiPrincipalPortionForBs uses la.disbursal_amount (row.processed_amount alias).
-                    // residualAfter > 0 means the borrower paid more than base+DPD → the extra is penalty+GST.
                     if (emiPaidLate) {
                         const principalPortion = getEmiPrincipalPortionForBs(row, emiNum) || 0;
-                        const expectedPayment = toDecimal2(
+                        const baseEmi = toDecimal2(
                             principalPortion +
                             interest_collected +
                             post_service_fee_ex_gst +
-                            post_service_fee_gst +
-                            dpdInterest
+                            post_service_fee_gst
                         );
-                        if (expectedPayment > 0) {
-                            const residualAfter = toDecimal2(repayment_amt - expectedPayment);
-                            if (residualAfter > 0.02) {
-                                penalty = toDecimal2(residualAfter / GST_FACTOR);
-                                gst_on_penalty = toDecimal2(penalty * GST_RATE);
-                            }
+
+                        // Remaining after the base EMI is consumed (never negative).
+                        let remaining = toDecimal2(Math.max(0, repayment_amt - baseEmi));
+
+                        // DPD bucket: take the lesser of the computed DPD and what's left.
+                        const dpdApplied = toDecimal2(Math.min(Math.max(0, dpdInterest), remaining));
+                        if (dpdApplied > 0.001) {
+                            penal_interest_dpd = dpdApplied;
+                        }
+                        remaining = toDecimal2(remaining - dpdApplied);
+
+                        // Penalty bucket: whatever is still left is penalty (incl. GST), split via ÷1.18.
+                        if (remaining > 0.02) {
+                            penalty = toDecimal2(remaining / GST_FACTOR);
+                            gst_on_penalty = toDecimal2(penalty * GST_RATE);
                         }
                     }
                 }
