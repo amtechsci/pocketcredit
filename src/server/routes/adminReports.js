@@ -1661,16 +1661,15 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                     post_service_fee_ex_gst = toDecimal2(bd.postFee);
                     post_service_fee_gst = toDecimal2(bd.postGst);
                 }
-                // Overdue EMI: payment.js adds penalty on top of the base emi_amount stored in emi_schedule.
-                // Use emi_schedule[emiNum-1].emi_amount as the exact base (principal+interest+fees, no penalty).
-                // payment.js also charges dpd_interest_on_total_principal (loanCalc formula:
-                //   principal * rate * max(1, daysBetween(due,payment)-1)), but this is NOT written back
-                // to emi_schedule — compute it here using the same formula so the residual equals
-                // only the penalty+GST component.
+                // The emi_schedule block is used ONLY to determine emiPaidLate and dpdInterest.
+                // The base EMI (principal + interest + fees) is reconstructed from the already-resolved
+                // bd-sourced components (interest_collected, post_service_fee_*) and getEmiPrincipalPortionForBs,
+                // which all use la.disbursal_amount as the principal — avoiding any dependency on
+                // instalment_amount / emi_amount, which can be stale or penalty-inclusive in older records.
                 if (bd) {
                     let emiPaidLate = false;
-                    let emiBaseFromSchedule = null;
                     let emiDueDateStr = null;
+                    let dpdInterest = 0;
 
                     if (row.emi_schedule) {
                         try {
@@ -1690,86 +1689,50 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                                         emiPaidLate = txDateStr > emiDueDateStr;
                                     }
                                 }
-                                // Compute the original base EMI (principal + interest + fees, no DPD/penalty).
-                                // Priority order — most reliable first:
-                                //  1. instalment_amount  — explicitly preserved as stable base by loanCalculations.js
-                                //     (emi_amount must NOT be used — it is the penalty-inclusive display value
-                                //      base + penalty_total + DPD, so adding dpdInterest again would double-count)
-                                //  2. Recomputed from bd (fresh, schedule-independent) — safe for old records
-                                //  3. emi_amount minus stored DPD/penalty components — last resort for very old records
-                                let base;
-                                if (emiEntry.instalment_amount != null) {
-                                    // Modern loans: instalment_amount is the original base preserved by loanCalc
-                                    base = parseFloat(emiEntry.instalment_amount) || 0;
-                                } else {
-                                    // Old records: reconstruct base from the already-computed bd breakdown.
-                                    // bd.interest + bd.postFee + bd.postGst come from buildEmiBreakdownMap
-                                    // which recalculates fresh from the loan data, independent of emi_schedule state.
-                                    const principalPortion = getEmiPrincipalPortionForBs(row, emiNum) || 0;
-                                    const computedBase = toDecimal2(
-                                        principalPortion +
-                                        (bd.interest || 0) +
-                                        (bd.postFee || 0) +
-                                        (bd.postGst || 0)
-                                    );
-                                    if (computedBase > 0) {
-                                        base = computedBase;
-                                    } else {
-                                        // Absolute fallback: subtract stored DPD + penalty from emi_amount
-                                        const storedDpd = parseFloat(emiEntry.dpd_interest_on_total_principal || emiEntry.dpd_interest || 0) || 0;
-                                        const storedPenT = parseFloat(emiEntry.penalty_total || 0) || 0;
-                                        base = Math.max(0, (parseFloat(emiEntry.emi_amount || 0) || 0) - storedDpd - storedPenT);
-                                    }
-                                }
-                                // Use stored dpd_interest if available; otherwise compute it using
-                                // the same formula as loanCalculations.js (only when actually late).
-                                let dpdInterest = parseFloat(
+                                // Prefer stored DPD; formula fallback runs below when this is 0.
+                                dpdInterest = parseFloat(
                                     emiEntry.dpd_interest_on_total_principal ||
                                     emiEntry.dpd_interest || 0
                                 ) || 0;
-                                if (dpdInterest === 0 && emiPaidLate && emiDueDateStr && row.transaction_date) {
-                                    const txDateStr2 = parseDateToString(row.transaction_date);
-                                    if (txDateStr2) {
-                                        const rawDays = calculateDaysBetween(emiDueDateStr, txDateStr2);
-                                        const dpdDays = Math.max(1, rawDays - 1);
-                                        const loanAmt = parseFloat(row.principal_amount || 0);
-                                        const dailyRate = clampDailyInterestRateForBsReport(row.interest_percent_per_day);
-                                        dpdInterest = toDecimal2(loanAmt * dailyRate * dpdDays);
-                                    }
-                                }
-                                if (base > 0) emiBaseFromSchedule = base + dpdInterest;
-                                if (emiPaidLate && dpdInterest > 0.001) {
-                                    penal_interest_dpd = toDecimal2(dpdInterest);
-                                }
                             }
                         } catch (e) { /* ignore parse errors */ }
                     }
 
-                    // Do not gate on la.processed_penalty: it often stays 0 while the paid EMI order
-                    // still includes penalty + GST (residual after base EMI + DPD). PLL641-style cases.
-                    if (emiPaidLate) {
-                        let residualAfter = null;
-                        if (emiBaseFromSchedule != null) {
-                            // residualAfter = repayment - (base_EMI + DPD); positive residual = penalty+GST
-                            residualAfter = toDecimal2(repayment_amt - emiBaseFromSchedule);
-                        } else {
-                            // Last-resort fallback: emiBaseFromSchedule could not be determined.
-                            // Reconstruct base from formula and subtract DPD so only the penalty portion remains.
-                            const principalEmi = getEmiPrincipalPortionForBs(row, emiNum);
-                            if (principalEmi != null) {
-                                residualAfter = toDecimal2(
-                                    repayment_amt -
-                                        principalEmi -
-                                        interest_collected -
-                                        post_service_fee_ex_gst -
-                                        post_service_fee_gst -
-                                        dpdInterest
-                                );
-                            }
+                    // Compute DPD via the same formula as loanCalculations.js when not stored.
+                    if (dpdInterest === 0 && emiPaidLate && emiDueDateStr && row.transaction_date) {
+                        const txDateStr2 = parseDateToString(row.transaction_date);
+                        if (txDateStr2) {
+                            const rawDays = calculateDaysBetween(emiDueDateStr, txDateStr2);
+                            const dpdDays = Math.max(1, rawDays - 1);
+                            const loanAmt = parseFloat(row.principal_amount || 0);
+                            const dailyRate = clampDailyInterestRateForBsReport(row.interest_percent_per_day);
+                            dpdInterest = toDecimal2(loanAmt * dailyRate * dpdDays);
                         }
-                        if (residualAfter != null && residualAfter > 0.02) {
-                            penalty = toDecimal2(residualAfter / GST_FACTOR);
-                            gst_on_penalty = toDecimal2(penalty * GST_RATE);
+                    }
+
+                    if (emiPaidLate && dpdInterest > 0.001) {
+                        penal_interest_dpd = toDecimal2(dpdInterest);
+                    }
+
+                    // Reconstruct the expected payment (base + DPD) from reliable, schedule-independent sources.
+                    // interest_collected and post_service_fee_* were set from bd (buildEmiBreakdownMap) above.
+                    // getEmiPrincipalPortionForBs uses la.disbursal_amount (row.processed_amount alias).
+                    // residualAfter > 0 means the borrower paid more than base+DPD → the extra is penalty+GST.
+                    if (emiPaidLate) {
+                        const principalPortion = getEmiPrincipalPortionForBs(row, emiNum) || 0;
+                        const expectedPayment = toDecimal2(
+                            principalPortion +
+                            interest_collected +
+                            post_service_fee_ex_gst +
+                            post_service_fee_gst +
+                            dpdInterest
+                        );
+                        if (expectedPayment > 0) {
+                            const residualAfter = toDecimal2(repayment_amt - expectedPayment);
+                            if (residualAfter > 0.02) {
+                                penalty = toDecimal2(residualAfter / GST_FACTOR);
+                                gst_on_penalty = toDecimal2(penalty * GST_RATE);
+                            }
                         }
                     }
                 }
