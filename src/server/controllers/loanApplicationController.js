@@ -321,8 +321,8 @@ const getAllUserLoanApplications = async (req, res) => {
  */
 const getLoanApplicationById = async (req, res) => {
   try {
-    const userId = req.userId || req.session?.userId;
-    const { applicationId } = req.params;
+    const userId = Number(req.userId || req.session?.userId);
+    const applicationId = Number(req.params.applicationId);
 
     if (!userId) {
       return res.status(401).json({
@@ -331,25 +331,43 @@ const getLoanApplicationById = async (req, res) => {
       });
     }
 
-    const { findApplicationById } = require('../models/loanApplicationModel');
-    const application = await findApplicationById(applicationId);
+    if (!applicationId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Invalid application ID'
+      });
+    }
 
-    if (!application) {
+    // Ownership enforced in SQL (avoids strict-equality type mismatches between JWT id and DB row)
+    const rows = await executeQuery(
+      `SELECT
+        la.id,
+        la.application_number,
+        la.loan_amount,
+        la.loan_purpose,
+        la.tenure_months,
+        la.emi_amount,
+        la.status,
+        la.rejection_reason,
+        DATE_FORMAT(la.approved_at, '%Y-%m-%d %H:%i:%s') as approved_at,
+        DATE_FORMAT(la.disbursed_at, '%Y-%m-%d %H:%i:%s') as disbursed_at,
+        DATE_FORMAT(la.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
+        DATE_FORMAT(la.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at,
+        la.user_bank_id,
+        la.current_step
+      FROM loan_applications la
+      WHERE la.id = ? AND la.user_id = ?`,
+      [applicationId, userId]
+    );
+
+    if (!rows || rows.length === 0) {
       return res.status(404).json({
         status: 'error',
         message: 'Loan application not found'
       });
     }
 
-    // Check if the application belongs to the current user
-    if (application.user_id !== userId) {
-      return res.status(403).json({
-        status: 'error',
-        message: 'Access denied. This application does not belong to you.'
-      });
-    }
-
-    const applicationSummary = getApplicationSummary(application);
+    const applicationSummary = getApplicationSummary(rows[0]);
 
     res.json({
       status: 'success',

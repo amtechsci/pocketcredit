@@ -128,11 +128,11 @@ export const LinkSalaryBankAccountPage = () => {
                     
                     try {
                       // Auto-link the bank to the application
-                      const linkResponse = await apiService.chooseBankDetails({
-                        application_id: applicationId,
-                        bank_details_id: primaryBank.id
-                      });
-                      if (linkResponse.success) {
+                      const linkResponse = await apiService.linkBankToApplication(
+                        applicationId,
+                        primaryBank.id
+                      );
+                      if (linkResponse.success || linkResponse.status === 'success') {
                         console.log('✅ Bank auto-linked to application');
                         // Clear cache to ensure fresh data
                         apiService.clearCache(`/loan-applications/${applicationId}`);
@@ -469,10 +469,7 @@ export const LinkSalaryBankAccountPage = () => {
 
           if (activeApplicationId) {
             try {
-              await apiService.chooseBankDetails({
-                application_id: activeApplicationId,
-                bank_details_id: newBankId
-              });
+              await apiService.linkBankToApplication(activeApplicationId, newBankId);
               apiService.clearCache(`/loan-applications/${activeApplicationId}`);
               apiService.clearCache('/loan-applications');
             } catch (e) {
@@ -574,10 +571,7 @@ export const LinkSalaryBankAccountPage = () => {
         }
         if (activeApplicationId && selectedBankId) {
           try {
-            await apiService.chooseBankDetails({
-              application_id: activeApplicationId,
-              bank_details_id: selectedBankId
-            });
+            await apiService.linkBankToApplication(activeApplicationId, selectedBankId);
             apiService.clearCache(`/loan-applications/${activeApplicationId}`);
             apiService.clearCache('/loan-applications');
           } catch (linkErr) {

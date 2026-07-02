@@ -189,8 +189,11 @@ async function resolveEnachBankReference(paymentId) {
  * @param {number} [presentationDue] - The borrower's obligation at presentation (penalty-inclusive due
  *   for the EMI as of the day the charge was raised, minus any prior paid). When omitted/0, falls back
  *   to the strict live-due check.
+ * @param {number} [presentedEmiNumber] - The specific EMI this charge was raised for. The charge is
+ *   applied to THIS EMI only (never the "next unpaid" one) so a re-applied/duplicate success can't
+ *   drift a single EMI's money onto a later EMI. Omitted/0 → legacy "first unpaid due EMI" behaviour.
  */
-async function applySuccessfulChargeToLoan({ loanApplicationId, paymentId, amount, presentationDue = 0 }) {
+async function applySuccessfulChargeToLoan({ loanApplicationId, paymentId, amount, presentationDue = 0, presentedEmiNumber = 0 }) {
   await initializeDatabase();
   const loans = await executeQuery(
     `SELECT id, status, user_id, application_number, emi_schedule, total_repayable
@@ -213,21 +216,57 @@ async function applySuccessfulChargeToLoan({ loanApplicationId, paymentId, amoun
     return { updated: false, reason: 'emi_schedule_invalid' };
   }
 
+  const targetEmiNumber = Number(presentedEmiNumber) || 0;
+  const findEmiIndexByNumber = (n) => schedule.findIndex(
+    (e) => Number(e.emi_number || e.instalment_no) === Number(n)
+  );
+
+  // IDEMPOTENCY: a given eNACH charge must hit the schedule EXACTLY ONCE. If this payment was
+  // already recorded for this loan, the schedule was updated on the first pass — re-running (recheck
+  // after a mid-way crash left the run PENDING, two overlapping recheck passes, a retried webhook)
+  // must NOT slide the same money onto the NEXT unpaid EMI. That drift is what made a single EMI-1
+  // debit show up as "2 EMIs paid". Report the presented EMI's current state and stop.
+  const priorChargeRow = await executeQuery(
+    `SELECT id FROM loan_payments WHERE transaction_id = ? AND loan_id = ? LIMIT 1`,
+    [paymentId, loanApplicationId]
+  );
+  if (priorChargeRow && priorChargeRow.length > 0) {
+    let priorFullyPaid = true;
+    if (targetEmiNumber > 0) {
+      const idx = findEmiIndexByNumber(targetEmiNumber);
+      if (idx !== -1) priorFullyPaid = String(schedule[idx].status || '').toLowerCase() === 'paid';
+    }
+    return { updated: false, reason: 'already_applied', emiFullyPaid: priorFullyPaid };
+  }
+
   const todayStr = new Date().toISOString().slice(0, 10);
   let targetIndex = -1;
 
-  for (let i = 0; i < schedule.length; i++) {
-    const emi = schedule[i];
-    const status = String(emi.status || '').toLowerCase();
-    const dueDate = String(emi.due_date || emi.dueDate || '').split('T')[0].split(' ')[0];
-    if (status !== 'paid' && dueDate <= todayStr) {
-      targetIndex = i;
-      break;
+  if (targetEmiNumber > 0) {
+    // Bind strictly to the EMI that was presented — never let the charge drift to another EMI.
+    targetIndex = findEmiIndexByNumber(targetEmiNumber);
+    if (targetIndex === -1) {
+      return { updated: false, reason: 'target_emi_not_found', emiFullyPaid: false };
     }
-  }
-
-  if (targetIndex === -1) {
-    return { updated: false, reason: 'no_unpaid_due_emi' };
+    if (String(schedule[targetIndex].status || '').toLowerCase() === 'paid') {
+      // Presented EMI already cleared (e.g. a manual payment landed first) — do nothing rather than
+      // push this charge onto a later EMI.
+      return { updated: false, reason: 'target_emi_already_paid', emiFullyPaid: true };
+    }
+  } else {
+    // Legacy runs with no stored emi_number: fall back to the first unpaid due EMI.
+    for (let i = 0; i < schedule.length; i++) {
+      const emi = schedule[i];
+      const status = String(emi.status || '').toLowerCase();
+      const dueDate = String(emi.due_date || emi.dueDate || '').split('T')[0].split(' ')[0];
+      if (status !== 'paid' && dueDate <= todayStr) {
+        targetIndex = i;
+        break;
+      }
+    }
+    if (targetIndex === -1) {
+      return { updated: false, reason: 'no_unpaid_due_emi' };
+    }
   }
 
   const targetEmi = schedule[targetIndex];
@@ -253,7 +292,7 @@ async function applySuccessfulChargeToLoan({ loanApplicationId, paymentId, amoun
     // later (separate) charge is ever needed. Only stamp paid_date once the EMI is fully cleared.
     paid_date: emiFullyPaid ? (targetEmi.paid_date || todayStr) : (targetEmi.paid_date || null)
   };
-  const emiNumber = targetIndex + 1;
+  const emiNumber = targetEmiNumber > 0 ? targetEmiNumber : (targetIndex + 1);
 
   await executeQuery(
     `UPDATE loan_applications

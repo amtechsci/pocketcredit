@@ -243,6 +243,28 @@ function emiNumberFromPaymentTypeString(paymentType) {
   return null;
 }
 
+/** Extract the EMI number a transaction explicitly names, e.g. "...emi_1st..." → 1. */
+function emiNumberFromDescription(description) {
+  const m = String(description || '').match(/emi_(\d+)(?:st|nd|rd|th)/i);
+  if (m) {
+    const n = parseInt(m[1], 10);
+    if (n >= 1 && n <= 4) return n;
+  }
+  return null;
+}
+
+/**
+ * True for auto-generated gateway ledger rows (Cashfree hosted checkout / recovery links).
+ * These are ALREADY fully applied by the gateway flow (emi_schedule + loan_payments +
+ * payment_orders), so admin-sync must NOT re-mirror them: doing so duplicates payment records
+ * and — because it re-picks the EMI via "first unpaid" — can drift the money onto the wrong EMI
+ * (the "1 EMI paid but 2 show paid" bug).
+ */
+function isGatewayOriginatedTransaction(transaction) {
+  const desc = String(transaction?.description || '');
+  return /via\s+cashfree/i.test(desc) || /Order:\s*(LOAN_|RECOV)/i.test(desc);
+}
+
 async function findPaymentOrderByType(executeQuery, loanId, paymentType) {
   const rows = await executeQuery(
     `SELECT id, order_id, status, amount, payment_type
@@ -397,6 +419,12 @@ async function syncAdminRepaymentTransaction(executeQuery, {
     return { changed: false, skipped: true, reason: 'not_repayment_type' };
   }
 
+  // Gateway-originated payments are already fully applied by the gateway flow. Mirroring them here
+  // duplicates records and can re-attribute the payment to the wrong EMI — so skip them entirely.
+  if (isGatewayOriginatedTransaction(transaction)) {
+    return { changed: false, skipped: true, reason: 'gateway_originated' };
+  }
+
   const loanId = parseInt(transaction.loan_application_id || loan?.id, 10);
   const userId = parseInt(transaction.user_id || loan?.user_id, 10);
   const amount = parseFloat(transaction.amount) || 0;
@@ -422,16 +450,14 @@ async function syncAdminRepaymentTransaction(executeQuery, {
       emiNumber = emiNumberFromPaymentTypeString(existingOrderForTx.payment_type);
     }
 
+    // Prefer the EMI the transaction explicitly names (e.g. "...emi_1st...") over "first unpaid":
+    // a payment must land on ITS OWN EMI regardless of whether an earlier EMI is already paid.
     if (emiNumber == null) {
-      emiNumber = getFirstUnpaidEmiNumber(emiScheduleArray);
+      emiNumber = emiNumberFromDescription(transaction.description);
     }
 
     if (emiNumber == null) {
-      const suffixMatch = String(transaction.description || '').match(/emi_(\d+(?:st|nd|rd|th))/i);
-      if (suffixMatch) {
-        const n = parseInt(suffixMatch[1], 10);
-        if (n >= 1 && n <= 4) emiNumber = n;
-      }
+      emiNumber = getFirstUnpaidEmiNumber(emiScheduleArray);
     }
 
     if (emiNumber == null) emiNumber = 1;

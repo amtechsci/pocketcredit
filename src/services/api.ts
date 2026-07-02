@@ -524,8 +524,24 @@ class ApiService {
   async updateBankDetails(id: number, data: {
     account_number?: string;
     is_primary?: boolean;
+    application_id?: number;
   }): Promise<ApiResponse<{ message: string }>> {
     return this.request('PUT', `/bank-details/${id}`, data);
+  }
+
+  /** Link an existing bank account to a loan application (choose API with PUT fallback). */
+  async linkBankToApplication(applicationId: number, bankDetailsId: number): Promise<ApiResponse<unknown>> {
+    const chooseResponse = await this.request('POST', '/bank-details/choose', {
+      application_id: applicationId,
+      bank_details_id: bankDetailsId,
+    });
+    if (chooseResponse.success || chooseResponse.status === 'success') {
+      return chooseResponse;
+    }
+    return this.updateBankDetails(bankDetailsId, {
+      is_primary: true,
+      application_id: applicationId,
+    });
   }
 
   async chooseBankDetails(data: {
@@ -544,6 +560,7 @@ class ApiService {
     loan_amount: number;
     loan_purpose: string;
     status: string;
+    user_bank_id?: number | null;
     current_step: string;
     created_at: string;
   }>> {

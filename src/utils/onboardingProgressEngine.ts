@@ -263,13 +263,29 @@ export async function checkAllPrerequisites(
     // 7. Check bank details completion
     if (applicationId) {
       try {
+        let userBankId: number | null = null;
+
         const appResponse = await apiService.getLoanApplicationById(applicationId, cacheOptions);
         if ((appResponse.success || appResponse.status === 'success') && appResponse.data?.application) {
-          const userBankId = (appResponse.data.application as any).user_bank_id;
-          prerequisites.bankDetailsCompleted = !!userBankId;
-          console.log(`[ProgressEngine] Bank details check: user_bank_id=${userBankId}, completed=${prerequisites.bankDetailsCompleted}`);
+          userBankId = (appResponse.data.application as any).user_bank_id ?? null;
         } else {
-          console.log(`[ProgressEngine] Bank details check: No application data in response`);
+          // Fallback when /loan-applications/:id fails (legacy ownership checks, etc.)
+          try {
+            const loanResp = await apiService.getLoanApplication(String(applicationId));
+            if (loanResp.success && loanResp.data) {
+              userBankId = (loanResp.data as any).user_bank_id ?? null;
+            }
+          } catch {
+            // ignore — try user-level bank check below
+          }
+        }
+
+        if (userBankId) {
+          prerequisites.bankDetailsCompleted = true;
+          console.log(`[ProgressEngine] Bank details check: user_bank_id=${userBankId}, completed=true`);
+        } else {
+          prerequisites.bankDetailsCompleted = false;
+          console.log('[ProgressEngine] Bank details check: application has no linked bank (user_bank_id missing)');
         }
       } catch (error: any) {
         if (error?.response?.status !== 404) {

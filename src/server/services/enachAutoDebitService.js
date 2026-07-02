@@ -553,7 +553,9 @@ async function runDueDateAutoDebit({ forceDryRun = false, forceRun = false } = {
         paymentId: chargeResult.paymentId,
         amount: candidate.dueEmi.amount,
         // Clear the EMI when the charge covered the presentation-date obligation (lag-agnostic)
-        presentationDue: candidate.dueEmi.presentationDue || 0
+        presentationDue: candidate.dueEmi.presentationDue || 0,
+        // Apply strictly to the EMI that was presented — never drift to the next EMI on a re-run
+        presentedEmiNumber: candidate.dueEmi.emiNumber
       });
       // PARTIAL (not SUCCESS) when the charge didn't fully cover the due, so the EMI is not treated
       // as "already paid" and the remainder is re-presented after the cooldown.
@@ -651,7 +653,9 @@ async function recheckPendingAutoDebitCharges({ forceRun = false } = {}) {
           loanApplicationId: run.loan_application_id,
           paymentId: run.payment_id,
           amount: run.amount,
-          presentationDue: runPresentationDue
+          presentationDue: runPresentationDue,
+          // Apply strictly to the EMI this run was raised for — never drift to the next EMI
+          presentedEmiNumber: run.emi_number
         });
         // If the settled amount did not fully cover the (by-now grown) due, record PARTIAL — not
         // SUCCESS — so the EMI isn't treated as "already paid" and the remainder is re-presented

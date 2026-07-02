@@ -30,17 +30,17 @@ router.post('/apply', requireAuthHybrid, checkHoldStatus, applyForLoan);
 router.get('/', requireAuthHybrid, getAllUserLoanApplications);
 
 /**
- * @route   GET /api/loan-applications/:applicationId
- * @desc    Get specific loan application by ID
- * @access  Private
- */
-router.get('/:applicationId', requireAuthHybrid, getLoanApplicationById);
-
-/**
  * @route   GET /api/loan-applications/stats/summary
  * @desc    Get loan application statistics
  * @access  Private
  */
 router.get('/stats/summary', requireAuthHybrid, getLoanApplicationStats);
+
+/**
+ * @route   GET /api/loan-applications/:applicationId
+ * @desc    Get specific loan application by ID
+ * @access  Private
+ */
+router.get('/:applicationId', requireAuthHybrid, getLoanApplicationById);
 
 module.exports = router;
