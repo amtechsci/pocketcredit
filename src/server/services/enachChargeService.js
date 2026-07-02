@@ -4,7 +4,8 @@ const { executeQuery, initializeDatabase } = require('../config/database');
 const {
   parseEmiSchedule,
   evaluateLoanClearanceEligibility,
-  recordEnachLedgerTransaction
+  recordEnachLedgerTransaction,
+  isEmiFullyPaid
 } = require('../utils/loanClearance');
 
 const CASHFREE_API_BASE = process.env.CASHFREE_API_BASE || 'https://sandbox.cashfree.com/pg';
@@ -32,6 +33,83 @@ function parseJson(value, fallback) {
   } catch (e) {
     return fallback;
   }
+}
+
+/**
+ * For idempotent re-runs: derive whether the original charge fully cleared its EMI.
+ * Legacy runs may omit presentedEmiNumber — look up the prior ledger/run record instead of
+ * defaulting to fully paid (which would incorrectly mark the run SUCCESS).
+ */
+async function resolvePriorChargeEmiFullyPaid({
+  loanApplicationId,
+  paymentId,
+  targetEmiNumber,
+  schedule,
+  findEmiIndexByNumber
+}) {
+  let emiNumber = Number(targetEmiNumber) || 0;
+
+  const emiFullyPaidFromSchedule = (n) => {
+    if (!n) return null;
+    const idx = findEmiIndexByNumber(n);
+    if (idx === -1) return null;
+    return isEmiFullyPaid(schedule[idx]);
+  };
+
+  if (emiNumber > 0) {
+    const fromSchedule = emiFullyPaidFromSchedule(emiNumber);
+    if (fromSchedule !== null) return fromSchedule;
+  }
+
+  try {
+    const txRows = await executeQuery(
+      `SELECT transaction_type, description FROM transactions
+       WHERE loan_application_id = ? AND reference_number = ?
+       LIMIT 1`,
+      [loanApplicationId, paymentId]
+    );
+    if (txRows?.length) {
+      const txType = String(txRows[0].transaction_type || '').toLowerCase();
+      if (txType === 'part_payment') return false;
+      if (txType === 'emi_payment') return true;
+
+      const desc = String(txRows[0].description || '');
+      const emiMatch = desc.match(/EMI\s+(\d+)\s+via\s+eNACH/i);
+      if (emiMatch) {
+        emiNumber = Number(emiMatch[1]) || 0;
+        const fromSchedule = emiFullyPaidFromSchedule(emiNumber);
+        if (fromSchedule !== null) return fromSchedule;
+      }
+    }
+  } catch (err) {
+    console.warn('[eNACH] Prior charge ledger lookup failed (non-fatal):', err.message);
+  }
+
+  try {
+    const runRows = await executeQuery(
+      `SELECT emi_number, status FROM enach_auto_debit_runs
+       WHERE loan_application_id = ? AND payment_id = ?
+       LIMIT 1`,
+      [loanApplicationId, paymentId]
+    );
+    if (runRows?.length) {
+      const runStatus = String(runRows[0].status || '').toUpperCase();
+      if (runStatus === 'PARTIAL') return false;
+      if (!emiNumber) emiNumber = Number(runRows[0].emi_number) || 0;
+      if (runStatus === 'SUCCESS') {
+        const fromSchedule = emiFullyPaidFromSchedule(emiNumber);
+        return fromSchedule !== null ? fromSchedule : true;
+      }
+    }
+  } catch (err) {
+    console.warn('[eNACH] Prior auto-debit run lookup failed (non-fatal):', err.message);
+  }
+
+  const fromSchedule = emiFullyPaidFromSchedule(emiNumber);
+  if (fromSchedule !== null) return fromSchedule;
+
+  // Unknown prior outcome — conservative PARTIAL so remainder can be re-presented
+  return false;
 }
 
 async function chargeSubscription({ userId, dbSubscriptionId, amount, source = 'manual' }) {
@@ -231,11 +309,13 @@ async function applySuccessfulChargeToLoan({ loanApplicationId, paymentId, amoun
     [paymentId, loanApplicationId]
   );
   if (priorChargeRow && priorChargeRow.length > 0) {
-    let priorFullyPaid = true;
-    if (targetEmiNumber > 0) {
-      const idx = findEmiIndexByNumber(targetEmiNumber);
-      if (idx !== -1) priorFullyPaid = String(schedule[idx].status || '').toLowerCase() === 'paid';
-    }
+    const priorFullyPaid = await resolvePriorChargeEmiFullyPaid({
+      loanApplicationId,
+      paymentId,
+      targetEmiNumber,
+      schedule,
+      findEmiIndexByNumber
+    });
     return { updated: false, reason: 'already_applied', emiFullyPaid: priorFullyPaid };
   }
 

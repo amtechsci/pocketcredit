@@ -11,6 +11,17 @@ const AUTO_DEBIT_DRY_RUN = String(process.env.ENACH_AUTO_DEBIT_DRY_RUN || 'false
 // After any non-SKIPPED presentation attempt, do not re-present the same EMI for this many days
 const COOLDOWN_DAYS = 3;
 
+/**
+ * Map applySuccessfulChargeToLoan result to a terminal auto-debit run status.
+ * PARTIAL only when the charge explicitly under-paid the EMI (emiFullyPaid === false).
+ * When emiFullyPaid is undefined (apply errors like loan_not_found, no_unpaid_due_emi, etc.)
+ * treat as SUCCESS so permanent failures are not re-presented after cooldown.
+ */
+function resolveAutoDebitRunStatus(applyRes) {
+  if (applyRes && applyRes.emiFullyPaid === false) return 'PARTIAL';
+  return 'SUCCESS';
+}
+
 // ─── Date helpers ────────────────────────────────────────────────────────────
 
 /**
@@ -559,7 +570,7 @@ async function runDueDateAutoDebit({ forceDryRun = false, forceRun = false } = {
       });
       // PARTIAL (not SUCCESS) when the charge didn't fully cover the due, so the EMI is not treated
       // as "already paid" and the remainder is re-presented after the cooldown.
-      const runStatus = applyRes && applyRes.emiFullyPaid === false ? 'PARTIAL' : 'SUCCESS';
+      const runStatus = resolveAutoDebitRunStatus(applyRes);
       success++;
       await updateRunById(runId, {
         status: runStatus,
@@ -660,7 +671,7 @@ async function recheckPendingAutoDebitCharges({ forceRun = false } = {}) {
         // If the settled amount did not fully cover the (by-now grown) due, record PARTIAL — not
         // SUCCESS — so the EMI isn't treated as "already paid" and the remainder is re-presented
         // after the cooldown. SUCCESS is reserved for a fully-cleared EMI.
-        const runStatus = applyRes && applyRes.emiFullyPaid === false ? 'PARTIAL' : 'SUCCESS';
+        const runStatus = resolveAutoDebitRunStatus(applyRes);
         await executeQuery(
           `UPDATE enach_auto_debit_runs
            SET status = ?, response_data = ?, last_error = NULL, updated_at = NOW()
