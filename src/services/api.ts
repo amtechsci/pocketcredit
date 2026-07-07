@@ -1862,6 +1862,42 @@ class ApiService {
     return this.request('GET', '/digitap/uan/stored');
   }
 
+  /** Employment verification (post-DigiLocker) */
+  async getEmploymentVerificationStatus(applicationId?: number | string, options?: { cache?: boolean; skipDeduplication?: boolean }): Promise<ApiResponse<any>> {
+    const query = applicationId ? `?applicationId=${applicationId}` : '';
+    return this.request('GET', `/employment-verification/status${query}`, options);
+  }
+
+  async checkEmploymentUANByPAN(data: { applicationId?: number; pan?: string }): Promise<ApiResponse<any>> {
+    return this.request('POST', '/employment-verification/check-uan-by-pan', data);
+  }
+
+  async sendEmploymentCompanyEmailOtp(data: { email: string; applicationId?: number }): Promise<ApiResponse<any>> {
+    return this.request('POST', '/employment-verification/company-email/send-otp', data);
+  }
+
+  async verifyEmploymentCompanyEmailOtp(data: { email: string; otp: string; applicationId?: number }): Promise<ApiResponse<any>> {
+    return this.request('POST', '/employment-verification/company-email/verify-otp', data);
+  }
+
+  async submitEmploymentUANNumber(data: { uanNumber: string; applicationId?: number }): Promise<ApiResponse<any>> {
+    return this.request('POST', '/employment-verification/uan-number', data);
+  }
+
+  async skipToManualEmploymentDocs(data?: { applicationId?: number }): Promise<ApiResponse<any>> {
+    return this.request('POST', '/employment-verification/skip-to-manual', data || {});
+  }
+
+  async uploadEmploymentDocuments(formData: FormData): Promise<ApiResponse<any>> {
+    const token = localStorage.getItem('pocket_user_token');
+    const response = await fetch(`${this.baseURL}/employment-verification/upload-documents`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData
+    });
+    return response.json();
+  }
+
   /**
    * Get partners for Our Partners page (public)
    */

@@ -2543,6 +2543,35 @@ class AdminApiService {
     }
   }
 
+  async getDocsVerifyList(page: number = 1, limit: number = 20, search: string = ''): Promise<ApiResponse<any>> {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const response = await axios.get('/api/admin/employment-verification/docs-verify', {
+        params: { page, limit, search: search || undefined },
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
+  }
+
+  async approveDocsVerifySelected(recordIds: number[]): Promise<ApiResponse<any>> {
+    try {
+      const token = localStorage.getItem('adminToken');
+      const response = await axios.post(
+        '/api/admin/employment-verification/approve-selected',
+        { recordIds },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      return response.data;
+    } catch (error) {
+      this.handleAuthError(error);
+      throw error;
+    }
+  }
+
   /**
    * Get users with loans in Account Manager status (account_manager or overdue)
    */

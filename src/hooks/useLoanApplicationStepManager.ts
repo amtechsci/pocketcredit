@@ -18,6 +18,7 @@ function mapEngineStepToHookStep(engineStep: EngineStep): LoanApplicationStep {
   // Most steps map 1:1
   if (engineStep === 'application' ||
     engineStep === 'kyc-verification' ||
+    engineStep === 'employment-verification' ||
     engineStep === 'credit-analytics' ||
     engineStep === 'employment-details' ||
     engineStep === 'bank-statement' ||
@@ -62,6 +63,7 @@ function mapEnginePrerequisitesToHook(enginePrereqs: EnginePrerequisites): StepP
 export type LoanApplicationStep =
   | 'application'           // Loan application creation
   | 'kyc-verification'      // KYC verification
+  | 'employment-verification' // Post-DigiLocker employment verification
   | 'credit-analytics'      // Credit analytics check
   | 'employment-details'    // Employment details
   | 'bank-statement'        // Bank statement upload
@@ -100,6 +102,7 @@ export interface StepStatus {
 const STEP_ORDER: LoanApplicationStep[] = [
   'application',           // Step 1: Create loan application
   'kyc-verification',      // Step 2: Complete KYC verification (Digilocker)
+  'employment-verification', // Step 2.75: Employment verification
   'credit-analytics',      // Step 3: Credit analytics check (auto-fetches credit report)
   'employment-details',     // Step 4: Enter company details, salary, etc. (REQUIRED after credit check)
   'bank-statement',         // Step 5: Upload bank statement
@@ -114,6 +117,7 @@ const STEP_ORDER: LoanApplicationStep[] = [
 export const STEP_ROUTES: Record<LoanApplicationStep, string> = {
   'application': '/application', // Application creation page
   'kyc-verification': '/loan-application/kyc-verification',
+  'employment-verification': '/loan-application/employment-verification',
   'credit-analytics': '/loan-application/credit-analytics',
   'employment-details': '/loan-application/employment-details',
   'bank-statement': '/loan-application/bank-statement',
@@ -240,7 +244,11 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
         });
 
         if (!hasAccess) {
-          const redirectRoute = getEngineStepRoute(progress.currentStep, progress.applicationId);
+          const redirectRoute = getEngineStepRoute(
+            progress.currentStep,
+            progress.applicationId,
+            progress.prerequisites
+          );
           const currentRoute = location.pathname;
 
           if (redirectRoute && currentRoute !== redirectRoute && requiredStep !== currentStep) {

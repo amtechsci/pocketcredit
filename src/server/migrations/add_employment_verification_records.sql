@@ -1,0 +1,28 @@
+-- Employment verification records (post-DigiLocker manual review queue)
+CREATE TABLE IF NOT EXISTS employment_verification_records (
+  id int NOT NULL AUTO_INCREMENT,
+  user_id int NOT NULL,
+  loan_application_id int DEFAULT NULL,
+  status enum('pending','verified','docs_verify','failed') NOT NULL DEFAULT 'pending',
+  method enum('uan_pan_api','company_email_otp','uan_number_manual','manual_docs') DEFAULT NULL,
+  pan_used varchar(10) DEFAULT NULL,
+  uan_number varchar(12) DEFAULT NULL,
+  company_email varchar(255) DEFAULT NULL,
+  email_otp varchar(6) DEFAULT NULL,
+  email_otp_expires_at timestamp NULL DEFAULT NULL,
+  payslip_document_id int DEFAULT NULL,
+  company_id_document_id int DEFAULT NULL,
+  payslip_s3_key varchar(500) DEFAULT NULL,
+  company_id_s3_key varchar(500) DEFAULT NULL,
+  uan_api_result_code int DEFAULT NULL,
+  uan_api_response json DEFAULT NULL,
+  verified_at timestamp NULL DEFAULT NULL,
+  verified_by_admin_id varchar(36) DEFAULT NULL,
+  created_at timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_evr_user_id (user_id),
+  KEY idx_evr_loan_application_id (loan_application_id),
+  KEY idx_evr_status (status),
+  KEY idx_evr_user_loan (user_id, loan_application_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

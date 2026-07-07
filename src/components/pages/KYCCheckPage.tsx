@@ -62,9 +62,17 @@ export const KYCCheckPage: React.FC = () => {
               // Continue to next step even if PAN check fails
             }
             
-            // Wait 2 seconds then proceed to credit analytics
-            setTimeout(() => {
-              navigate('/loan-application/credit-analytics');
+            // Wait 2 seconds then proceed via progress engine
+            setTimeout(async () => {
+              try {
+                const appId = applicationId ? parseInt(applicationId, 10) : null;
+                const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
+                const progress = await getOnboardingProgress(appId, true);
+                const nextRoute = getStepRoute(progress.currentStep, appId);
+                navigate(nextRoute, { replace: true });
+              } catch {
+                navigate(`/loan-application/employment-verification${applicationId ? `?applicationId=${applicationId}` : ''}`, { replace: true });
+              }
             }, 2000);
           } else if (kycStatus === 'failed') {
             setStatus('failed');
@@ -120,7 +128,7 @@ export const KYCCheckPage: React.FC = () => {
             <div className="text-center space-y-4">
               <CheckCircle className="w-16 h-16 mx-auto text-green-600" />
               <p className="text-lg font-medium text-green-900">KYC Verified Successfully!</p>
-              <p className="text-sm text-gray-600">Redirecting to employment details...</p>
+              <p className="text-sm text-gray-600">Redirecting to employment verification...</p>
             </div>
           )}
 

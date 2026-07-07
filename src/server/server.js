@@ -360,6 +360,12 @@ app.use('/api/recovery-payment', recoveryPaymentRoutes);
 const digitapRoutes = require('./routes/digitap');
 app.use('/api/digitap', digitapRoutes);
 
+const employmentVerificationRoutes = require('./routes/employmentVerification');
+app.use('/api/employment-verification', employmentVerificationRoutes);
+
+const adminEmploymentVerificationRoutes = require('./routes/adminEmploymentVerification');
+app.use('/api/admin/employment-verification', adminEmploymentVerificationRoutes);
+
 const studentDocumentsRoutes = require('./routes/studentDocuments');
 app.use('/api/student-documents', studentDocumentsRoutes);
 

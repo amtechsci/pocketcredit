@@ -22,6 +22,7 @@ export type OnboardingStep =
   | 'application'           // Step 1: Create loan application
   | 'kyc-verification'      // Step 2: Complete KYC verification (Digilocker)
   | 'pan-verification'      // Step 2.5: PAN verification (after KYC)
+  | 'employment-verification' // Step 2.75: Employment verification (UAN / company email / docs)
   | 'aa-consent'            // Step 3: Account Aggregator consent
   | 'credit-analytics'      // Step 4: Credit analytics check (auto-fetches credit report)
   | 'employment-details'    // Step 5: Enter company details, salary, etc.
@@ -36,6 +37,8 @@ export interface OnboardingPrerequisites {
   kycVerified: boolean;
   rekycRequired: boolean; // Admin triggered re-KYC
   panVerified: boolean;
+  employmentVerificationCompleted: boolean;
+  employmentDocsVerifyPending: boolean;
   aaConsentGiven: boolean;
   creditAnalyticsCompleted: boolean;
   employmentCompleted: boolean;
@@ -59,6 +62,7 @@ export const STEP_ORDER: OnboardingStep[] = [
   'application',           // Step 1: Create loan application
   'kyc-verification',      // Step 2: Complete KYC verification
   'pan-verification',      // Step 2.5: PAN verification (after KYC)
+  'employment-verification', // Step 2.75: Employment verification
   'aa-consent',            // Step 3: Account Aggregator consent
   'credit-analytics',      // Step 4: Credit analytics check
   'employment-details',    // Step 5: Employment details
@@ -74,6 +78,7 @@ export const STEP_ROUTES: Record<OnboardingStep, string> = {
   'application': '/application',
   'kyc-verification': '/loan-application/kyc-verification',
   'pan-verification': '/loan-application/kyc-verification', // PAN is handled on KYC page
+  'employment-verification': '/loan-application/employment-verification',
   'aa-consent': '/loan-application/aa-flow',
   'credit-analytics': '/loan-application/credit-analytics',
   'employment-details': '/loan-application/employment-details',
@@ -100,6 +105,8 @@ export async function checkAllPrerequisites(
     kycVerified: false,
     rekycRequired: false,
     panVerified: false,
+    employmentVerificationCompleted: false,
+    employmentDocsVerifyPending: false,
     aaConsentGiven: false,
     creditAnalyticsCompleted: false,
     employmentCompleted: false,
@@ -152,6 +159,22 @@ export async function checkAllPrerequisites(
         }
       } catch (error) {
         console.error('[ProgressEngine] Error checking PAN:', error);
+      }
+    }
+
+    // 2.5 Check employment verification (post-DigiLocker, before credit analytics)
+    if (prerequisites.panVerified) {
+      try {
+        const evResponse = await apiService.getEmploymentVerificationStatus(
+          applicationId || undefined,
+          cacheOptions
+        );
+        if (evResponse.success && evResponse.data) {
+          prerequisites.employmentVerificationCompleted = evResponse.data.verified === true;
+          prerequisites.employmentDocsVerifyPending = evResponse.data.docs_verify === true;
+        }
+      } catch (error) {
+        console.error('[ProgressEngine] Error checking employment verification:', error);
       }
     }
 
@@ -401,6 +424,11 @@ export function determineCurrentStep(
     return 'pan-verification';
   }
 
+  // Priority 3.5: Employment verification (post-DigiLocker UAN / manual)
+  if (!prerequisites.employmentVerificationCompleted) {
+    return 'employment-verification';
+  }
+
   // Priority 4: Account Aggregator consent (optional - can skip if bank statement can be uploaded manually)
   // NOTE: AA consent is checked but if it fails, we don't block - user can upload bank statement manually
   // Only block if AA is explicitly required by business logic
@@ -498,6 +526,7 @@ export async function getOnboardingProgress(
   if (forceRefresh) {
     // Clear all step-related caches comprehensively
     apiService.clearCache('/digilocker'); // KYC, PAN
+    apiService.clearCache('/employment-verification');
     apiService.clearCache('/credit-analytics'); // Credit check
     apiService.clearCache('/employment-details'); // Employment
     apiService.clearCache('/bank-statement'); // Bank statement
@@ -569,6 +598,7 @@ export async function getOnboardingProgress(
     const allPrerequisitesComplete = 
       prerequisites.kycVerified &&
       prerequisites.panVerified &&
+      prerequisites.employmentVerificationCompleted &&
       prerequisites.creditAnalyticsCompleted &&
       prerequisites.employmentCompleted &&
       prerequisites.bankStatementCompleted &&
@@ -601,6 +631,8 @@ export async function getOnboardingProgress(
         kycVerified: prerequisites.kycVerified,
         rekycRequired: prerequisites.rekycRequired,
         panVerified: prerequisites.panVerified,
+        employmentVerificationCompleted: prerequisites.employmentVerificationCompleted,
+        employmentDocsVerifyPending: prerequisites.employmentDocsVerifyPending,
         creditAnalyticsCompleted: prerequisites.creditAnalyticsCompleted,
         employmentCompleted: prerequisites.employmentCompleted,
         bankStatementCompleted: prerequisites.bankStatementCompleted,
@@ -695,6 +727,11 @@ function getStepReason(prerequisites: OnboardingPrerequisites, step: OnboardingS
       return 'KYC not verified';
     case 'pan-verification':
       return 'PAN not verified';
+    case 'employment-verification':
+      if (prerequisites.employmentDocsVerifyPending) {
+        return 'Employment documents under admin review';
+      }
+      return 'Employment verification not completed';
     case 'aa-consent':
       return 'AA consent not given';
     case 'credit-analytics':
@@ -724,7 +761,23 @@ function getStepReason(prerequisites: OnboardingPrerequisites, step: OnboardingS
 /**
  * Get the route for a specific step
  */
-export function getStepRoute(step: OnboardingStep, applicationId?: number | null): string {
+export function getStepRoute(
+  step: OnboardingStep,
+  applicationId?: number | null,
+  prerequisites?: Pick<OnboardingPrerequisites, 'employmentDocsVerifyPending'>
+): string {
+  // User uploaded docs — must wait for admin; always show pending screen
+  if (
+    step === 'employment-verification' &&
+    prerequisites?.employmentDocsVerifyPending
+  ) {
+    const pendingRoute = '/loan-application/employment-docs-pending';
+    if (applicationId) {
+      return `${pendingRoute}?applicationId=${applicationId}`;
+    }
+    return pendingRoute;
+  }
+
   const baseRoute = STEP_ROUTES[step];
   if (!baseRoute) {
     return '/dashboard';

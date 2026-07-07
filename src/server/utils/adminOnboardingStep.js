@@ -8,6 +8,7 @@ const ONBOARDING_STEP_ORDER = [
   'application',
   'kyc-verification',
   'pan-verification',
+  'employment-verification',
   'credit-analytics',
   'employment-details',
   'bank-statement',
@@ -134,6 +135,9 @@ function computeOnboardingCurrentStep(user, latestApplication, referencesCount, 
   const hasPanDocument = hasPanVerifiedForAdmin(user, kycDocuments);
   const aaConsentGiven = aaOrBankStatement;
   const creditAnalyticsCompleted = !!(creditCheck && creditCheck.credit_score != null && Number(creditCheck.credit_score) > 450);
+  const employmentVerificationCompleted = opts.employmentVerificationCompleted !== undefined
+    ? opts.employmentVerificationCompleted
+    : (creditAnalyticsCompleted || !!(employment.length > 0 && employment.some(e => e.company_name)));
   const employmentCompleted = !!(
     (user.employment_type && String(user.employment_type).trim() !== '') &&
     (user.income_range != null && String(user.income_range).trim() !== '') &&
@@ -146,6 +150,7 @@ function computeOnboardingCurrentStep(user, latestApplication, referencesCount, 
     true,
     kycVerified,
     hasPanDocument,
+    employmentVerificationCompleted,
     creditAnalyticsCompleted,
     employmentCompleted,
     bankStatementCompleted,

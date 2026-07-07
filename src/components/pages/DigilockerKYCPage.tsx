@@ -430,7 +430,7 @@ export const DigilockerKYCPage: React.FC = () => {
               navigate(nextRoute, { replace: true });
             } catch (error) {
               console.error('[DigilockerKYC] Error getting next step, using fallback:', error);
-              navigate('/loan-application/credit-analytics', {
+              navigate('/loan-application/employment-verification', {
                 replace: true
               });
             }
@@ -499,7 +499,7 @@ export const DigilockerKYCPage: React.FC = () => {
 
   const handleSkipKYC = () => {
     toast.info('Skipping KYC verification. You can complete it later.');
-    navigate('/loan-application/credit-analytics');
+    navigate('/loan-application/employment-verification');
   };
 
   const handlePanChange = (e: React.ChangeEvent<HTMLInputElement>) => {

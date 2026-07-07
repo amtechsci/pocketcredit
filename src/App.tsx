@@ -25,6 +25,9 @@ import { DigilockerKYCPage } from './components/pages/DigilockerKYCPage';
 import { KYCCheckPage } from './components/pages/KYCCheckPage';
 import { CreditAnalyticsPage } from './components/pages/CreditAnalyticsPage';
 import { EmploymentDetailsPage } from './components/pages/EmploymentDetailsPage';
+import { EmploymentVerificationPage } from './components/pages/EmploymentVerificationPage';
+import { UploadEmploymentDocumentsPage } from './components/pages/UploadEmploymentDocumentsPage';
+import { EmploymentDocsPendingPage } from './components/pages/EmploymentDocsPendingPage';
 import { CreditCheckPage } from './components/pages/CreditCheckPage';
 import { BankStatementUploadPage } from './components/pages/BankStatementUploadPage';
 import { BankStatementSuccessPage } from './components/pages/BankStatementSuccessPage';
@@ -501,6 +504,38 @@ function AppContent() {
               <StepGuard step="credit-analytics">
                 <CreditAnalyticsPage />
               </StepGuard>
+            </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+
+        <Route path="/loan-application/employment-verification" element={
+          isAuthenticated ? (
+            <DashboardLayout>
+              <StepGuard step="employment-verification">
+                <EmploymentVerificationPage />
+              </StepGuard>
+            </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+
+        <Route path="/loan-application/upload-employment-documents" element={
+          isAuthenticated ? (
+            <DashboardLayout>
+              <UploadEmploymentDocumentsPage />
+            </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
+        } />
+
+        <Route path="/loan-application/employment-docs-pending" element={
+          isAuthenticated ? (
+            <DashboardLayout>
+              <EmploymentDocsPendingPage />
             </DashboardLayout>
           ) : (
             <Navigate to="/auth" replace />

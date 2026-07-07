@@ -404,8 +404,95 @@ function generateUANClientRefNum(userId) {
   return `ent-${userId}-${timestamp}-${random}`;
 }
 
+const UAN_BASIC_PAN_URL = process.env.DIGITAP_UAN_PAN_URL || 'https://svc.digitap.ai/cv/v3/uan_basic/sync';
+const UAN_BASIC_BY_NUMBER_URL =
+  process.env.DIGITAP_UAN_BY_NUMBER_URL ||
+  'https://svcint.digitap.ai/wrap/prod/svc/cv/v3/uan_basic/sync';
+
+function parseUANBasicSyncResponse(response) {
+  if (response.status !== 200) {
+    return {
+      success: false,
+      error: response.data?.message || 'Failed to get UAN data',
+      data: response.data
+    };
+  }
+
+  const resultCode = response.data?.result_code;
+  if (resultCode === 101) {
+    return {
+      success: true,
+      data: response.data
+    };
+  }
+
+  return {
+    success: false,
+    error: response.data?.message || 'No records found',
+    data: response.data,
+    result_code: resultCode
+  };
+}
+
 /**
- * UAN Basic V3 - Synchronous API call
+ * UAN Basic V3 - Synchronous API call (by UAN number)
+ * @param {string} uan - 12-digit UAN
+ * @param {string} clientRefNum - Client reference number
+ * @returns {Promise<{success: boolean, data?: object, error?: string, result_code?: number}>}
+ */
+async function getUANByNumber(uan, clientRefNum) {
+  try {
+    const uanTrimmed = String(uan || '').trim();
+    if (!/^\d{12}$/.test(uanTrimmed)) {
+      return {
+        success: false,
+        error: 'Invalid UAN number format. Must be exactly 12 digits.'
+      };
+    }
+
+    const authToken = getUANBasicAuthToken();
+    const url = UAN_BASIC_BY_NUMBER_URL;
+    const requestBody = {
+      uan: uanTrimmed,
+      client_ref_num: String(clientRefNum)
+    };
+
+    console.log(`Calling UAN Basic V3 API (by UAN): ${url}`);
+    console.log(`Request body:`, JSON.stringify(requestBody, null, 2));
+
+    const response = await axios.post(url, requestBody, {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Basic ${authToken}`
+      },
+      timeout: 60000
+    });
+
+    console.log(`UAN Basic V3 (by UAN) Response:`, JSON.stringify(response.data, null, 2));
+    return parseUANBasicSyncResponse(response);
+  } catch (error) {
+    console.error('UAN Basic V3 (by UAN) API Error:', error.message);
+    if (error.response) {
+      let errorMessage = error.response.data?.message || error.response.data?.error_msg || 'Internal Server Error';
+      if (typeof error.response.data === 'string' && error.response.data.includes('<html>')) {
+        errorMessage = `API returned ${error.response.status} error. Please check authentication configuration.`;
+      }
+      return {
+        success: false,
+        error: errorMessage,
+        data: error.response.data,
+        status: error.response.status
+      };
+    }
+    return {
+      success: false,
+      error: error.message || 'Network error occurred'
+    };
+  }
+}
+
+/**
+ * UAN Basic V3 - Synchronous API call (by PAN + mobile)
  * @param {string} mobile - Mobile number
  * @param {string} clientRefNum - Client reference number
  * @param {string} pan - PAN number (required for API)
@@ -447,8 +534,7 @@ async function getUANBasic(mobile, clientRefNum, pan) {
     const authToken = getUANBasicAuthToken();
     console.log(`UAN Basic Auth token configured: ${authToken.substring(0, 20)}...`);
 
-    // Use the correct production URL
-    const url = 'https://svc.digitap.ai/cv/v3/uan_basic/sync';
+    const url = UAN_BASIC_PAN_URL;
 
     // Build request body with all required fields as per API spec
     const requestBody = {
@@ -473,32 +559,7 @@ async function getUANBasic(mobile, clientRefNum, pan) {
     console.log(`UAN Basic V3 API Response Status: ${response.status}`);
     console.log(`UAN Basic V3 API Response:`, JSON.stringify(response.data, null, 2));
 
-    if (response.status === 200) {
-      const resultCode = response.data?.result_code;
-      const httpResponseCode = response.data?.http_response_code || response.status;
-      
-      // Check if result is successful (101) - UAN Basic V3 returns result_code 101 for success
-      if (resultCode === 101) {
-        return {
-          success: true,
-          data: response.data
-        };
-      } else {
-        // API returned 200 but with error result_code (e.g., 103 = No records found)
-        return {
-          success: false,
-          error: response.data?.message || 'No records found',
-          data: response.data,
-          result_code: resultCode
-        };
-      }
-    } else {
-      return {
-        success: false,
-        error: response.data?.message || 'Failed to get UAN data',
-        data: response.data
-      };
-    }
+    return parseUANBasicSyncResponse(response);
   } catch (error) {
     console.error('UAN Basic V3 API Error:', error.message);
     console.error('Error status:', error.response?.status);
@@ -542,6 +603,7 @@ module.exports = {
   fetchUserPrefillData,
   validatePANDetails,
   getUANBasic,
+  getUANByNumber,
   generateUANClientRefNum
 };
 

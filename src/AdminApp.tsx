@@ -25,6 +25,7 @@ import { CoolingPeriodPage } from './admin/pages/CoolingPeriodPage';
 import { RegisteredPage } from './admin/pages/RegisteredPage';
 import { ApprovedPage } from './admin/pages/ApprovedPage';
 import { QAVerificationPage } from './admin/pages/QAVerificationPage';
+import { DocsVerifyPage } from './admin/pages/DocsVerifyPage';
 import { AccountManagerPage } from './admin/pages/AccountManagerPage';
 import { OverduePage } from './admin/pages/OverduePage';
 import { TvrIdsPage } from './admin/pages/TvrIdsPage';
@@ -185,6 +186,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
       { path: `${BASE_PATH}/approved`, label: 'Approved', color: 'green' },
       { path: `${BASE_PATH}/cooling-period`, label: 'Cooling Period', color: 'orange' },
       { path: `${BASE_PATH}/qa-verification`, label: 'QA Verification', color: 'cyan' },
+      { path: `${BASE_PATH}/docs-verify`, label: 'Docs Verify', color: 'orange' },
       { path: `${BASE_PATH}/reports`, label: 'Reports', color: 'blue' },
       { path: `${BASE_PATH}/performance`, label: 'Performance', color: 'blue' }
     );
@@ -497,6 +499,11 @@ export default function AdminApp() {
         <Route path="qa-verification" element={
           <ProtectedRoute>
             <QAVerificationPage />
+          </ProtectedRoute>
+        } />
+        <Route path="docs-verify" element={
+          <ProtectedRoute>
+            <DocsVerifyPage />
           </ProtectedRoute>
         } />
         <Route path="account-manager" element={
