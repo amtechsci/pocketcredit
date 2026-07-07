@@ -14,6 +14,16 @@ router.post('/check', requireAuth, async (req, res) => {
     await initializeDatabase();
     const userId = req.userId;
 
+    const { getEmploymentVerificationStatus } = require('../services/employmentVerificationService');
+    const employmentStatus = await getEmploymentVerificationStatus(userId, null);
+    if (!employmentStatus.verified) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Complete employment verification before credit check',
+        employment_verification_required: true
+      });
+    }
+
     // Check if credit check already exists for this user
     const existingCheck = await executeQuery(
       'SELECT id, credit_score, is_eligible, checked_at FROM credit_checks WHERE user_id = ?',

@@ -255,28 +255,6 @@ async function getEmploymentVerificationStatus(userId, loanApplicationId) {
   const record = await getLatestRecord(userId, appId);
 
   if (!record) {
-    // Grandfather users who already passed credit analytics before this feature existed
-    try {
-      const creditRows = await executeQuery(
-        `SELECT credit_score FROM credit_checks
-         WHERE user_id = ? ORDER BY checked_at DESC LIMIT 1`,
-        [userId]
-      );
-      const score = creditRows[0]?.credit_score;
-      if (score != null && Number(score) > 450) {
-        return {
-          loan_application_id: appId,
-          status: 'verified',
-          verified: true,
-          docs_verify: false,
-          method: null,
-          grandfathered: true
-        };
-      }
-    } catch (e) {
-      // non-fatal
-    }
-
     return {
       loan_application_id: appId,
       status: 'pending',

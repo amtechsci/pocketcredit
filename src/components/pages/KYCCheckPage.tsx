@@ -21,8 +21,7 @@ export const KYCCheckPage: React.FC = () => {
     const checkKYCStatus = async () => {
       try {
         console.log('🔍 Checking KYC status for application:', applicationId);
-        
-        // Fetch actual KYC status from database
+
         const response = await apiService.request('GET', `/digilocker/kyc-status/${applicationId}`, {});
 
         console.log('📊 KYC Status Response:', response);
@@ -32,11 +31,9 @@ export const KYCCheckPage: React.FC = () => {
 
           if (kycStatus === 'verified') {
             try {
-              // Try to fetch full KYC details once using stored transactionId
               const txn = response.data?.verification_data?.transactionId;
               if (txn) {
                 await apiService.digilockerGetDetails(txn);
-                // Optionally also fetch docs (PDF/XML links)
                 await apiService.digilockerListDocs(txn);
               }
             } catch (e) {
@@ -44,48 +41,30 @@ export const KYCCheckPage: React.FC = () => {
             }
             setStatus('verified');
             toast.success('KYC verification successful!');
-            
-            // Check if PAN document exists
-            try {
-              const panCheckResponse = await apiService.checkPanDocument(applicationId);
-              if (panCheckResponse.success && !panCheckResponse.data?.hasPanDocument) {
-                setTimeout(() => {
-                  navigate(
-                    `/loan-application/employment-verification?applicationId=${applicationId}`,
-                    { replace: true }
-                  );
-                }, 1500);
-                return;
-              }
-            } catch (panError) {
-              console.error('Error checking PAN document:', panError);
-              // Continue to next step even if PAN check fails
-            }
-            
-            // Wait 2 seconds then proceed via progress engine
+
             setTimeout(async () => {
               try {
-                const appId = applicationId ? parseInt(applicationId, 10) : null;
-                const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
-                const progress = await getOnboardingProgress(appId, true);
-                const nextRoute = getStepRoute(progress.currentStep, appId);
+                const appId = parseInt(applicationId, 10);
+                const { getPostKycRoute } = await import('../../utils/onboardingProgressEngine');
+                const nextRoute = await getPostKycRoute(appId);
+                console.log('[KYCCheck] Post-KYC route:', nextRoute);
                 navigate(nextRoute, { replace: true });
               } catch {
-                navigate(`/loan-application/employment-verification${applicationId ? `?applicationId=${applicationId}` : ''}`, { replace: true });
+                navigate(`/loan-application/employment-verification?applicationId=${applicationId}`, {
+                  replace: true
+                });
               }
-            }, 2000);
+            }, 1500);
           } else if (kycStatus === 'failed') {
             setStatus('failed');
             toast.error('KYC verification failed');
-            
-            // Wait 2 seconds then go back to KYC page
+
             setTimeout(() => {
               navigate('/loan-application/kyc-verification', {
                 state: { applicationId }
               });
             }, 2000);
           } else if (kycStatus === 'pending') {
-            // Still pending, wait and check again
             setTimeout(() => {
               checkKYCStatus();
             }, 2000);
@@ -96,8 +75,7 @@ export const KYCCheckPage: React.FC = () => {
       } catch (error: any) {
         console.error('KYC status check error:', error);
         toast.error('Failed to verify KYC status');
-        
-        // Redirect back to KYC page after error
+
         setTimeout(() => {
           navigate('/loan-application/kyc-verification', {
             state: { applicationId }
@@ -146,4 +124,3 @@ export const KYCCheckPage: React.FC = () => {
 };
 
 export default KYCCheckPage;
-

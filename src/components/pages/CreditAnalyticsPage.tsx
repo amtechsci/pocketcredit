@@ -18,6 +18,21 @@ export const CreditAnalyticsPage = () => {
   // Auto-fetch credit analytics data on mount, and if no data exists, auto-perform credit check
   useEffect(() => {
     const initializeCreditCheck = async () => {
+      try {
+        const evStatus = await apiService.getEmploymentVerificationStatus(undefined, {
+          cache: false,
+          skipDeduplication: true
+        });
+        if (!evStatus.success || !evStatus.data?.verified) {
+          toast.info('Please complete employment verification first');
+          navigate('/loan-application/employment-verification', { replace: true });
+          return;
+        }
+      } catch {
+        navigate('/loan-application/employment-verification', { replace: true });
+        return;
+      }
+
       // First, try to fetch existing credit data
       try {
         setLoading(true);

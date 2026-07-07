@@ -84,105 +84,35 @@ export const DigilockerKYCPage: React.FC = () => {
           return; // Allow access, don't check loan status
         }
         
-        // KYC is verified - now check if PAN document exists
-        // If PAN is missing, show PAN input (don't redirect even with pending loan)
+        // KYC verified — send user to employment verification (UAN) before credit analytics
         const applicationsResponse = await apiService.getLoanApplications();
-        console.log('🔍 [KYC Page] KYC verified, checking for pending loans - API response:', applicationsResponse);
-        
         const isSuccess = applicationsResponse.success === true || applicationsResponse.status === 'success';
-        
-        if (isSuccess && applicationsResponse.data && applicationsResponse.data.applications) {
-          const applications = applicationsResponse.data.applications;
-          console.log('📋 [KYC Page] Applications found:', applications.length, applications.map((app: any) => ({ id: app.id, status: app.status })));
+        let activeAppId: number | null = applicationId ? parseInt(String(applicationId), 10) : null;
 
-          // Get the active application ID for PAN check
-          const activeApp = applications.find((app: any) => {
+        if (isSuccess && applicationsResponse.data?.applications?.length) {
+          const activeApp = applicationsResponse.data.applications.find((app: any) => {
             const status = (app.status || '').toLowerCase().trim();
             return !['cleared', 'cancelled'].includes(status);
           });
-          
-          const appIdForPanCheck = activeApp?.id || applicationId;
-          
-          // Check if PAN document exists BEFORE redirecting
-          if (appIdForPanCheck) {
-            try {
-              const panCheckResponse = await apiService.checkPanDocument(String(appIdForPanCheck));
-              console.log('🔍 [KYC Page] PAN check response:', panCheckResponse);
-              
-              if (panCheckResponse.success && !panCheckResponse.data?.hasPanDocument) {
-                console.log('⚠️ [KYC Page] PAN missing — redirecting to employment verification');
-                setChecking(false);
-                navigate(
-                  `/loan-application/employment-verification?applicationId=${appIdForPanCheck}`,
-                  { replace: true }
-                );
-                return;
-              } else {
-                console.log('✅ [KYC Page] PAN document found');
-              }
-            } catch (panError) {
-              console.error('Error checking PAN document:', panError);
-              console.log('⚠️ [KYC Page] PAN check failed — redirecting to employment verification');
-              setChecking(false);
-              navigate(
-                `/loan-application/employment-verification?applicationId=${appIdForPanCheck}`,
-                { replace: true }
-              );
-              return;
-            }
-          }
-
-          // Define statuses that allow KYC access (only cleared and cancelled)
-          const allowedStatuses = ['cleared', 'cancelled'];
-          
-          // Check if user has any applications that are NOT cleared or cancelled
-          const hasPendingOrActiveLoan = applications.some((app: any) => {
-            const status = (app.status || '').toLowerCase().trim();
-            const isNotAllowed = !allowedStatuses.includes(status);
-            console.log(`🔍 [KYC Page] App ${app.id}: status="${app.status}" (normalized: "${status}"), isNotAllowed=${isNotAllowed}`);
-            return isNotAllowed;
-          });
-
-          console.log('🔍 [KYC Page] Has pending/active loan?', hasPendingOrActiveLoan);
-
-          if (hasPendingOrActiveLoan) {
-            // User has pending/active loan AND KYC is already verified AND PAN exists
-            // Use progress engine to determine next step instead of hardcoding dashboard
-            console.log('🚫 [KYC Page] KYC verified, PAN exists, but has pending loan - using progress engine');
-            setChecking(false);
-            
-            // Get the active application ID
-            const activeApp = applications.find((app: any) => {
-              const status = (app.status || '').toLowerCase().trim();
-              return !['cleared', 'cancelled'].includes(status);
-            });
-            
-            if (activeApp?.id) {
-              setTimeout(async () => {
-                try {
-                  const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
-                  const progress = await getOnboardingProgress(activeApp.id);
-                  const nextRoute = getStepRoute(progress.currentStep, activeApp.id);
-                  console.log('[DigilockerKYC] Next step from engine (pending loan):', progress.currentStep, '->', nextRoute);
-                  navigate(nextRoute, { replace: true });
-                } catch (error) {
-                  console.error('[DigilockerKYC] Error getting next step, using fallback:', error);
-                  // Fallback to dashboard
-                  navigate('/dashboard', { replace: true });
-                }
-              }, 500);
-            } else {
-              // No active app found, go to dashboard
-              navigate('/dashboard', { replace: true });
-            }
-            return;
-          } else {
-            console.log('✅ [KYC Page] All loans are cleared or cancelled - allowing KYC access');
-            setChecking(false); // Allow page to render
-          }
-        } else {
-          setChecking(false); // Allow page to render if no applications found
+          if (activeApp?.id) activeAppId = activeApp.id;
         }
+
+        setChecking(false);
+        setTimeout(async () => {
+          try {
+            const { getPostKycRoute } = await import('../../utils/onboardingProgressEngine');
+            const nextRoute = await getPostKycRoute(activeAppId);
+            console.log('[DigilockerKYC] Post-KYC route:', nextRoute);
+            navigate(nextRoute, { replace: true });
+          } catch (error) {
+            console.error('[DigilockerKYC] Post-KYC redirect failed:', error);
+            navigate(
+              `/loan-application/employment-verification${activeAppId ? `?applicationId=${activeAppId}` : ''}`,
+              { replace: true }
+            );
+          }
+        }, 500);
+        return;
       } catch (error) {
         console.error('❌ [KYC Page] Error checking pending loans and KYC:', error);
         // On error, allow access (don't block) - let other checks handle it
@@ -279,96 +209,23 @@ export const DigilockerKYCPage: React.FC = () => {
               console.log('🔍 PAN check response:', panCheckResponse);
               
               if (panCheckResponse.success && !panCheckResponse.data?.hasPanDocument) {
-                // No PAN document found - but check if employment details are already completed
-                // If employment is completed, user has already progressed past KYC, so skip PAN requirement
-                try {
-                  const employmentResponse = await apiService.getEmploymentDetailsStatus();
-                  if (employmentResponse.status === 'success' && employmentResponse.data?.completed) {
-                    console.log('✅ Employment details completed - skipping PAN requirement');
-                    // Employment completed means user already passed this step
-                    // But check for pending loans before redirecting
-                    try {
-                      const applicationsResponse = await apiService.getLoanApplications();
-                      const isSuccess = applicationsResponse.success === true || applicationsResponse.status === 'success';
-                      
-                      if (isSuccess && applicationsResponse.data && applicationsResponse.data.applications) {
-                        const applications = applicationsResponse.data.applications;
-                        const allowedStatuses = ['cleared', 'cancelled'];
-                        const hasPendingOrActiveLoan = applications.some((app: any) => {
-                          const status = (app.status || '').toLowerCase().trim();
-                          return !allowedStatuses.includes(status);
-                        });
-                        
-                        if (hasPendingOrActiveLoan) {
-                          // Use progress engine instead of hardcoding dashboard
-                          console.log('🚫 [KYC Page] Employment completed but user has pending loan - using progress engine');
-                          const activeApp = applications.find((app: any) => {
-                            const status = (app.status || '').toLowerCase().trim();
-                            return !allowedStatuses.includes(status);
-                          });
-                          
-                          if (activeApp?.id) {
-                            setTimeout(async () => {
-                              try {
-                                const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
-                                const progress = await getOnboardingProgress(activeApp.id);
-                                const nextRoute = getStepRoute(progress.currentStep, activeApp.id);
-                                console.log('[DigilockerKYC] Next step from engine (employment completed):', progress.currentStep, '->', nextRoute);
-                                navigate(nextRoute, { replace: true });
-                              } catch (error) {
-                                console.error('[DigilockerKYC] Error getting next step, using fallback:', error);
-                                navigate('/dashboard', { replace: true });
-                              }
-                            }, 1000);
-                          } else {
-                            navigate('/dashboard', { replace: true });
-                          }
-                          return;
-                        }
-                      }
-                    } catch (loanCheckError) {
-                      console.error('Error checking loan status:', loanCheckError);
-                    }
-                    
-                    // No pending loans - use progress engine to determine next step
-                    setTimeout(async () => {
-                      try {
-                        const appId = applicationId ? parseInt(applicationId) : null;
-                        const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
-                        const progress = await getOnboardingProgress(appId);
-                        const nextRoute = getStepRoute(progress.currentStep, appId);
-                        console.log('[DigilockerKYC] Next step from engine (no pending loans):', progress.currentStep, '->', nextRoute);
-                        navigate(nextRoute, { replace: true });
-                      } catch (error) {
-                        console.error('[DigilockerKYC] Error getting next step, using fallback:', error);
-                        navigate('/loan-application/employment-details', {
-                          state: { applicationId },
-                          replace: true
-                        });
-                      }
-                    }, 1500);
-                    return;
-                  }
-                } catch (empError) {
-                  console.error('Error checking employment status:', empError);
-                }
-                
-                // No PAN document found and employment not completed - show PAN input
-                console.log('⚠️ No PAN document found - showing PAN input');
-                setShowPanInput(true);
+                console.log('⚠️ No PAN document — redirecting to employment verification');
                 setChecking(false);
-                toast.info('Please enter your PAN number to complete verification');
+                navigate(
+                  `/loan-application/employment-verification?applicationId=${applicationId}`,
+                  { replace: true }
+                );
                 return;
               } else {
                 console.log('✅ PAN document found');
               }
             } catch (panError) {
               console.error('Error checking PAN document:', panError);
-              // If PAN check fails (e.g., API authentication error), show manual PAN input
-              console.log('⚠️ PAN check failed - showing manual PAN input');
-              setShowPanInput(true);
               setChecking(false);
-              toast.info('Please enter your PAN number to complete verification');
+              navigate(
+                `/loan-application/employment-verification?applicationId=${applicationId}`,
+                { replace: true }
+              );
               return;
             }
           }
@@ -398,10 +255,9 @@ export const DigilockerKYCPage: React.FC = () => {
                 if (activeApp?.id) {
                   setTimeout(async () => {
                     try {
-                      const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
-                      const progress = await getOnboardingProgress(activeApp.id);
-                      const nextRoute = getStepRoute(progress.currentStep, activeApp.id);
-                      console.log('[DigilockerKYC] Next step from engine (KYC verified):', progress.currentStep, '->', nextRoute);
+                      const { getPostKycRoute } = await import('../../utils/onboardingProgressEngine');
+                      const nextRoute = await getPostKycRoute(activeApp.id);
+                      console.log('[DigilockerKYC] Post-KYC route (KYC verified):', nextRoute);
                       navigate(nextRoute, { replace: true });
                     } catch (error) {
                       console.error('[DigilockerKYC] Error getting next step, using fallback:', error);
@@ -423,10 +279,9 @@ export const DigilockerKYCPage: React.FC = () => {
           setTimeout(async () => {
             try {
               const appId = applicationId ? parseInt(applicationId) : null;
-              const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
-              const progress = await getOnboardingProgress(appId);
-              const nextRoute = getStepRoute(progress.currentStep, appId);
-              console.log('[DigilockerKYC] Next step from engine (KYC + PAN complete):', progress.currentStep, '->', nextRoute);
+              const { getPostKycRoute } = await import('../../utils/onboardingProgressEngine');
+              const nextRoute = await getPostKycRoute(appId);
+              console.log('[DigilockerKYC] Post-KYC route (KYC + PAN complete):', nextRoute);
               navigate(nextRoute, { replace: true });
             } catch (error) {
               console.error('[DigilockerKYC] Error getting next step, using fallback:', error);
@@ -533,14 +388,14 @@ export const DigilockerKYCPage: React.FC = () => {
         // Wait a moment for backend to process, then use progress engine to determine next step
         setTimeout(async () => {
           try {
-            const { getOnboardingProgress, getStepRoute } = await import('../../utils/onboardingProgressEngine');
-            const appIdNum = appId && appId !== '0' ? parseInt(appId) : null;
-            const progress = await getOnboardingProgress(appIdNum);
-            const nextRoute = getStepRoute(progress.currentStep, appIdNum);
-            console.log('[DigilockerKYC] After PAN save, next step from engine:', progress.currentStep, '->', nextRoute);
+            const { getPostKycRoute } = await import('../../utils/onboardingProgressEngine');
+            const appIdNum = appId && appId !== '0' ? parseInt(appId, 10) : null;
+            const nextRoute = await getPostKycRoute(appIdNum);
+            console.log('[DigilockerKYC] Post-KYC route (after PAN save):', nextRoute);
             navigate(nextRoute, { replace: true });
           } catch (error) {
             console.error('[DigilockerKYC] Error getting next step after PAN save, using fallback:', error);
+            const appIdNum = appId && appId !== '0' ? parseInt(appId, 10) : null;
             navigate(
               `/loan-application/employment-verification${appIdNum ? `?applicationId=${appIdNum}` : ''}`,
               { replace: true }

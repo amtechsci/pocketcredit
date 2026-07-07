@@ -684,11 +684,13 @@ export async function getOnboardingProgress(
     // This ensures the app never crashes and user can always proceed
     const fallbackProgress: OnboardingProgress = {
       currentStep: 'kyc-verification',
-      nextStep: 'pan-verification',
+      nextStep: 'employment-verification',
       prerequisites: {
         kycVerified: false,
         rekycRequired: false,
         panVerified: false,
+        employmentVerificationCompleted: false,
+        employmentDocsVerifyPending: false,
         aaConsentGiven: false,
         creditAnalyticsCompleted: false,
         employmentCompleted: false,
@@ -756,6 +758,26 @@ function getStepReason(prerequisites: OnboardingPrerequisites, step: OnboardingS
     default:
       return 'Unknown reason';
   }
+}
+
+/**
+ * Route after KYC is verified — employment verification (UAN) must run before credit analytics.
+ */
+export async function getPostKycRoute(applicationId: number | null): Promise<string> {
+  try {
+    const evResponse = await apiService.getEmploymentVerificationStatus(applicationId || undefined, {
+      cache: false,
+      skipDeduplication: true
+    });
+    if (evResponse.success && evResponse.data?.verified) {
+      const progress = await getOnboardingProgress(applicationId, true);
+      return getStepRoute(progress.currentStep, applicationId, progress.prerequisites);
+    }
+  } catch (error) {
+    console.warn('[ProgressEngine] getPostKycRoute employment check failed:', error);
+  }
+
+  return getStepRoute('employment-verification', applicationId);
 }
 
 /**
