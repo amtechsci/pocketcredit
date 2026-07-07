@@ -1,13 +1,31 @@
 const { executeQuery } = require('../config/database');
 
+const NEW_USER_SAFETY_HOLD_PHRASE = 'New account safety check';
+
+const isNewUserSafetyHold = (reason) =>
+  Boolean(reason && String(reason).includes(NEW_USER_SAFETY_HOLD_PHRASE));
+
+const releaseUserHold = async (userId) => {
+  await executeQuery(
+    `UPDATE users 
+      SET status = 'active', 
+          eligibility_status = 'pending',
+          application_hold_reason = NULL,
+          hold_until_date = NULL,
+          updated_at = NOW()
+      WHERE id = ?`,
+    [userId]
+  );
+};
+
 /**
- * Release hold if hold_until_date has passed.
+ * Release hold if hold_until_date has passed, or if the temporary new-user safety hold is disabled.
  * Used by dashboard/profile routes that don't run checkHoldStatus middleware.
  * @returns {Promise<{ released: boolean }>}
  */
 const releaseExpiredHoldIfNeeded = async (userId) => {
   const users = await executeQuery(
-    `SELECT status, hold_until_date FROM users WHERE id = ?`,
+    `SELECT status, hold_until_date, application_hold_reason FROM users WHERE id = ?`,
     [userId]
   );
 
@@ -17,7 +35,17 @@ const releaseExpiredHoldIfNeeded = async (userId) => {
 
   const user = users[0];
 
-  if (user.status !== 'on_hold' || !user.hold_until_date) {
+  if (user.status !== 'on_hold') {
+    return { released: false };
+  }
+
+  // TEMP: new-user safety hold disabled — release existing accounts on next login/dashboard load
+  if (isNewUserSafetyHold(user.application_hold_reason)) {
+    await releaseUserHold(userId);
+    return { released: true };
+  }
+
+  if (!user.hold_until_date) {
     return { released: false };
   }
 
@@ -25,16 +53,7 @@ const releaseExpiredHoldIfNeeded = async (userId) => {
   const now = new Date();
 
   if (now > holdUntil) {
-    await executeQuery(
-      `UPDATE users 
-      SET status = 'active', 
-          eligibility_status = 'pending',
-          application_hold_reason = NULL,
-          hold_until_date = NULL,
-          updated_at = NOW()
-      WHERE id = ?`,
-      [userId]
-    );
+    await releaseUserHold(userId);
     return { released: true };
   }
 
@@ -84,6 +103,12 @@ const checkHoldStatus = async (req, res, next) => {
 
     // Check if user is on hold
     if (user.status === 'on_hold') {
+      // TEMP: auto-release disabled new-user safety hold
+      if (isNewUserSafetyHold(user.application_hold_reason)) {
+        await releaseUserHold(userId);
+        return next();
+      }
+
       // Check if hold is temporary (has hold_until_date)
       if (user.hold_until_date) {
         const holdUntil = new Date(user.hold_until_date);
@@ -91,7 +116,7 @@ const checkHoldStatus = async (req, res, next) => {
 
         // Check if hold period has expired
         if (now > holdUntil) {
-          await releaseExpiredHoldIfNeeded(userId);
+          await releaseUserHold(userId);
           return next();
         } else {
           // Still on hold - calculate remaining days

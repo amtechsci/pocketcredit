@@ -320,6 +320,8 @@ const verifyOtp = async (req, res) => {
     } else {
       // Update last login for existing user
       await updateLastLogin(user.id);
+      await releaseExpiredHoldIfNeeded(user.id);
+      user = await findUserById(user.id);
       // If existing user logged in with partner UTM link, ensure they are attributed to that partner (UTM-only link)
       try {
         const { utm_source, utm_medium } = req.body;
