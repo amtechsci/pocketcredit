@@ -116,9 +116,9 @@ router.post('/check-uan-by-pan', requireAuth, async (req, res) => {
       });
     }
 
-    if (pan && pan !== storedPan) {
+    if (pan) {
       await executeQuery(
-        'UPDATE users SET pan_number = COALESCE(pan_number, ?), updated_at = NOW() WHERE id = ?',
+        'UPDATE users SET pan_number = ?, updated_at = NOW() WHERE id = ?',
         [panToUse, userId]
       );
     }

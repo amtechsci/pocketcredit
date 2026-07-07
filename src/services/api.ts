@@ -1868,8 +1868,11 @@ class ApiService {
     return this.request('GET', `/employment-verification/status${query}`, options);
   }
 
-  async checkEmploymentUANByPAN(data: { applicationId?: number; pan?: string }): Promise<ApiResponse<any>> {
-    return this.request('POST', '/employment-verification/check-uan-by-pan', data);
+  async checkEmploymentUANByPAN(
+    data: { applicationId?: number; pan?: string },
+    options?: { cache?: boolean; skipDeduplication?: boolean }
+  ): Promise<ApiResponse<any>> {
+    return this.request('POST', '/employment-verification/check-uan-by-pan', data, options);
   }
 
   async sendEmploymentCompanyEmailOtp(data: { email: string; applicationId?: number }): Promise<ApiResponse<any>> {

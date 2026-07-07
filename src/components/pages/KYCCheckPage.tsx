@@ -49,12 +49,12 @@ export const KYCCheckPage: React.FC = () => {
             try {
               const panCheckResponse = await apiService.checkPanDocument(applicationId);
               if (panCheckResponse.success && !panCheckResponse.data?.hasPanDocument) {
-                // No PAN document - redirect to KYC page to show PAN input
                 setTimeout(() => {
-                  navigate('/loan-application/kyc-verification', {
-                    state: { applicationId, showPanInput: true }
-                  });
-                }, 2000);
+                  navigate(
+                    `/loan-application/employment-verification?applicationId=${applicationId}`,
+                    { replace: true }
+                  );
+                }, 1500);
                 return;
               }
             } catch (panError) {

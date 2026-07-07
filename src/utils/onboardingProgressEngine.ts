@@ -162,8 +162,8 @@ export async function checkAllPrerequisites(
       }
     }
 
-    // 2.5 Check employment verification (post-DigiLocker, before credit analytics)
-    if (prerequisites.panVerified) {
+    // 2.5 Employment verification (after KYC; PAN entry + UAN run on employment step if missing)
+    if (prerequisites.kycVerified) {
       try {
         const evResponse = await apiService.getEmploymentVerificationStatus(
           applicationId || undefined,
@@ -419,14 +419,14 @@ export function determineCurrentStep(
     return 'kyc-verification';
   }
 
-  // Priority 3: PAN verification (after KYC)
-  if (!prerequisites.panVerified) {
-    return 'pan-verification';
-  }
-
-  // Priority 3.5: Employment verification (post-DigiLocker UAN / manual)
+  // Priority 3: Employment verification (PAN from DigiLocker or manual entry + UAN API)
   if (!prerequisites.employmentVerificationCompleted) {
     return 'employment-verification';
+  }
+
+  // Priority 3.5: PAN verification fallback (legacy KYC page PAN flow)
+  if (!prerequisites.panVerified) {
+    return 'pan-verification';
   }
 
   // Priority 4: Account Aggregator consent (optional - can skip if bank statement can be uploaded manually)

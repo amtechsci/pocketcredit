@@ -110,24 +110,24 @@ export const DigilockerKYCPage: React.FC = () => {
               console.log('🔍 [KYC Page] PAN check response:', panCheckResponse);
               
               if (panCheckResponse.success && !panCheckResponse.data?.hasPanDocument) {
-                // PAN is missing - show PAN input (don't redirect)
-                console.log('⚠️ [KYC Page] PAN document missing - showing PAN input');
-                setShowPanInput(true);
-                setApplicationId(String(appIdForPanCheck));
+                console.log('⚠️ [KYC Page] PAN missing — redirecting to employment verification');
                 setChecking(false);
-                toast.info('Please enter your PAN number to complete verification');
-                return; // Don't redirect - user needs to enter PAN
+                navigate(
+                  `/loan-application/employment-verification?applicationId=${appIdForPanCheck}`,
+                  { replace: true }
+                );
+                return;
               } else {
                 console.log('✅ [KYC Page] PAN document found');
               }
             } catch (panError) {
               console.error('Error checking PAN document:', panError);
-              // If PAN check fails, show manual PAN input
-              console.log('⚠️ [KYC Page] PAN check failed - showing manual PAN input');
-              setShowPanInput(true);
-              setApplicationId(String(appIdForPanCheck));
+              console.log('⚠️ [KYC Page] PAN check failed — redirecting to employment verification');
               setChecking(false);
-              toast.info('Please enter your PAN number to complete verification');
+              navigate(
+                `/loan-application/employment-verification?applicationId=${appIdForPanCheck}`,
+                { replace: true }
+              );
               return;
             }
           }
@@ -541,10 +541,10 @@ export const DigilockerKYCPage: React.FC = () => {
             navigate(nextRoute, { replace: true });
           } catch (error) {
             console.error('[DigilockerKYC] Error getting next step after PAN save, using fallback:', error);
-            // Fallback to credit analytics (old behavior)
-            navigate('/loan-application/credit-analytics', {
-              replace: true
-            });
+            navigate(
+              `/loan-application/employment-verification${appIdNum ? `?applicationId=${appIdNum}` : ''}`,
+              { replace: true }
+            );
           }
         }, 1500);
       } else {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
@@ -9,6 +9,8 @@ import { toast } from 'sonner';
 import { apiService } from '../../services/api';
 import { VerifyEmploymentPage } from './VerifyEmploymentPage';
 import { getOnboardingProgress, getStepRoute } from '../../utils/onboardingProgressEngine';
+
+const PAN_REGEX = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
 
 export const EmploymentVerificationPage: React.FC = () => {
   const navigate = useNavigate();
@@ -22,96 +24,148 @@ export const EmploymentVerificationPage: React.FC = () => {
   const [validatingPan, setValidatingPan] = useState(false);
   const [checkingUan, setCheckingUan] = useState(false);
 
-  useEffect(() => {
-    const init = async () => {
-      try {
-        let appId = applicationId;
-        if (!appId) {
-          const apps = await apiService.getLoanApplications();
-          if (apps.success && apps.data?.applications?.length) {
-            const active = apps.data.applications.find(
-              (a: any) => !['cleared', 'cancelled', 'rejected'].includes(a.status)
-            );
-            appId = active?.id || apps.data.applications[0].id;
-            setApplicationId(appId);
-          }
-        }
+  const resolveApplicationId = useCallback(async (): Promise<number | null> => {
+    if (applicationIdParam) {
+      const parsed = parseInt(applicationIdParam, 10);
+      if (!Number.isNaN(parsed)) return parsed;
+    }
+    const apps = await apiService.getLoanApplications();
+    if (apps.success && apps.data?.applications?.length) {
+      const active = apps.data.applications.find(
+        (a: any) => !['cleared', 'cancelled', 'rejected'].includes(a.status)
+      );
+      return active?.id || apps.data.applications[0].id;
+    }
+    return null;
+  }, [applicationIdParam]);
 
-        const statusRes = await apiService.getEmploymentVerificationStatus(appId || undefined, {
+  const resolvePanNumber = useCallback(async (appId: number | null): Promise<string | null> => {
+    try {
+      const profile = await apiService.getUserProfile();
+      const fromProfile = profile.data?.user?.pan_number?.trim().toUpperCase();
+      if (fromProfile && PAN_REGEX.test(fromProfile)) {
+        return fromProfile;
+      }
+    } catch (error) {
+      console.warn('[EmploymentVerification] Could not load PAN from profile:', error);
+    }
+
+    if (appId) {
+      try {
+        const panRes = await apiService.checkPanDocument(String(appId), {
           cache: false,
           skipDeduplication: true
         });
-
-        if (statusRes.success && statusRes.data) {
-          if (statusRes.data.verified) {
-            setPhase('done');
-            const progress = await getOnboardingProgress(appId, true);
-            navigate(getStepRoute(progress.currentStep, appId), { replace: true });
-            return;
-          }
-          if (statusRes.data.docs_verify) {
-            navigate(`/loan-application/employment-docs-pending${appId ? `?applicationId=${appId}` : ''}`, { replace: true });
-            return;
+        if (panRes?.success && panRes.data?.hasPanDocument) {
+          const profile = await apiService.getUserProfile();
+          const fromProfile = profile.data?.user?.pan_number?.trim().toUpperCase();
+          if (fromProfile && PAN_REGEX.test(fromProfile)) {
+            return fromProfile;
           }
         }
+      } catch (error) {
+        console.warn('[EmploymentVerification] PAN document check failed:', error);
+      }
+    }
 
-        const panRes = appId ? await apiService.checkPanDocument(String(appId)) : null;
-        const hasPan = panRes?.success && panRes.data?.hasPanDocument;
+    return null;
+  }, []);
 
-        if (!hasPan) {
+  const runUanCheck = useCallback(
+    async (appId: number | null, pan?: string) => {
+      setCheckingUan(true);
+      setPhase('uan-check');
+      try {
+        const panArg = pan?.trim().toUpperCase();
+        console.log('[EmploymentVerification] Calling UAN-by-PAN API', { appId, hasPan: !!panArg });
+
+        const response = await apiService.checkEmploymentUANByPAN(
+          {
+            applicationId: appId || undefined,
+            pan: panArg
+          },
+          { skipDeduplication: true }
+        );
+
+        if (response.needsPan) {
           setPhase('pan');
           return;
         }
 
-        setPhase('uan-check');
-        await runUanCheck(appId, undefined);
+        if (response.verified) {
+          toast.success('Employment verified successfully');
+          setPhase('done');
+          const progress = await getOnboardingProgress(appId, true);
+          navigate(getStepRoute(progress.currentStep, appId, progress.prerequisites), { replace: true });
+          return;
+        }
+
+        if (response.shouldShowManualFlow) {
+          setPhase('verify');
+          return;
+        }
+
+        setPhase('verify');
+      } catch (error: any) {
+        console.error('UAN check error:', error);
+        toast.error(error.message || 'Employment verification failed. Please try manual verification.');
+        setPhase('verify');
+      } finally {
+        setCheckingUan(false);
+      }
+    },
+    [navigate]
+  );
+
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const appId = await resolveApplicationId();
+        setApplicationId(appId);
+
+        try {
+          const statusRes = await apiService.getEmploymentVerificationStatus(appId || undefined, {
+            cache: false,
+            skipDeduplication: true
+          });
+
+          if (statusRes.success && statusRes.data) {
+            if (statusRes.data.verified) {
+              setPhase('done');
+              const progress = await getOnboardingProgress(appId, true);
+              navigate(getStepRoute(progress.currentStep, appId, progress.prerequisites), { replace: true });
+              return;
+            }
+            if (statusRes.data.docs_verify) {
+              navigate(
+                `/loan-application/employment-docs-pending${appId ? `?applicationId=${appId}` : ''}`,
+                { replace: true }
+              );
+              return;
+            }
+          }
+        } catch (statusError) {
+          console.warn('[EmploymentVerification] Status check failed (continuing to UAN):', statusError);
+        }
+
+        const resolvedPan = await resolvePanNumber(appId);
+        if (resolvedPan) {
+          await runUanCheck(appId, resolvedPan);
+        } else {
+          setPhase('pan');
+        }
       } catch (error) {
         console.error('Employment verification init error:', error);
-        setPhase('verify');
+        setPhase('pan');
       }
     };
+
     init();
-  }, []);
-
-  const runUanCheck = async (appId: number | null, pan?: string) => {
-    setCheckingUan(true);
-    try {
-      const response = await apiService.checkEmploymentUANByPAN({
-        applicationId: appId || undefined,
-        pan: pan?.toUpperCase()
-      });
-
-      if (response.needsPan) {
-        setPhase('pan');
-        return;
-      }
-
-      if (response.verified) {
-        toast.success('Employment verified successfully');
-        setPhase('done');
-        const progress = await getOnboardingProgress(appId, true);
-        navigate(getStepRoute(progress.currentStep, appId), { replace: true });
-        return;
-      }
-
-      if (response.shouldShowManualFlow) {
-        setPhase('verify');
-        return;
-      }
-
-      setPhase('verify');
-    } catch (error: any) {
-      console.error('UAN check error:', error);
-      setPhase('verify');
-    } finally {
-      setCheckingUan(false);
-    }
-  };
+  }, [navigate, resolveApplicationId, resolvePanNumber, runUanCheck]);
 
   const handleValidatePan = async () => {
-    const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
     const pan = panNumber.trim().toUpperCase();
-    if (!panRegex.test(pan)) {
+    if (!PAN_REGEX.test(pan)) {
       toast.error('Please enter a valid PAN number (e.g. ABCDE1234F)');
       return;
     }
@@ -120,7 +174,7 @@ export const EmploymentVerificationPage: React.FC = () => {
       const response = await apiService.validatePAN(pan);
       if (response.success || response.status === 'success') {
         toast.success('PAN validated successfully');
-        setPhase('uan-check');
+        apiService.clearCache('/digilocker/check-pan-document');
         await runUanCheck(applicationId, pan);
       } else {
         toast.error(response.message || 'Invalid PAN number');
@@ -155,7 +209,7 @@ export const EmploymentVerificationPage: React.FC = () => {
           <CardHeader>
             <CardTitle className="text-center">Enter PAN Number</CardTitle>
             <p className="text-sm text-gray-600 text-center">
-              PAN was not returned from DigiLocker. Please enter your PAN to continue.
+              PAN was not returned from DigiLocker. Please enter your PAN to continue employment verification.
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
