@@ -172,6 +172,10 @@ export async function checkAllPrerequisites(
         if (evResponse.success && evResponse.data) {
           prerequisites.employmentVerificationCompleted = evResponse.data.verified === true;
           prerequisites.employmentDocsVerifyPending = evResponse.data.docs_verify === true;
+        } else if ((evResponse as any).status === 'success' && (evResponse as any).data) {
+          const data = (evResponse as any).data;
+          prerequisites.employmentVerificationCompleted = data.verified === true;
+          prerequisites.employmentDocsVerifyPending = data.docs_verify === true;
         }
       } catch (error) {
         console.error('[ProgressEngine] Error checking employment verification:', error);
@@ -490,6 +494,14 @@ export function canAccessStep(
   targetStep: OnboardingStep,
   prerequisites: OnboardingPrerequisites
 ): boolean {
+  // Employment verification (UAN) is mandatory before credit analytics or employment details
+  if (
+    (targetStep === 'credit-analytics' || targetStep === 'employment-details') &&
+    !prerequisites.employmentVerificationCompleted
+  ) {
+    return false;
+  }
+
   const currentStep = determineCurrentStep(prerequisites);
   const currentIndex = STEP_ORDER.indexOf(currentStep);
   const targetIndex = STEP_ORDER.indexOf(targetStep);

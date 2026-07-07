@@ -244,8 +244,16 @@ export const useLoanApplicationStepManager = (requiredStep?: LoanApplicationStep
         });
 
         if (!hasAccess) {
+          let redirectStep = progress.currentStep;
+          if (
+            !progress.prerequisites.employmentVerificationCompleted &&
+            (engineRequiredStep === 'credit-analytics' || engineRequiredStep === 'employment-details')
+          ) {
+            redirectStep = 'employment-verification';
+          }
+
           const redirectRoute = getEngineStepRoute(
-            progress.currentStep,
+            redirectStep,
             progress.applicationId,
             progress.prerequisites
           );

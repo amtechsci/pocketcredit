@@ -42,18 +42,10 @@ export const KYCCheckPage: React.FC = () => {
             setStatus('verified');
             toast.success('KYC verification successful!');
 
-            setTimeout(async () => {
-              try {
-                const appId = parseInt(applicationId, 10);
-                const { getPostKycRoute } = await import('../../utils/onboardingProgressEngine');
-                const nextRoute = await getPostKycRoute(appId);
-                console.log('[KYCCheck] Post-KYC route:', nextRoute);
-                navigate(nextRoute, { replace: true });
-              } catch {
-                navigate(`/loan-application/employment-verification?applicationId=${applicationId}`, {
-                  replace: true
-                });
-              }
+            setTimeout(() => {
+              navigate(`/loan-application/employment-verification?applicationId=${applicationId}`, {
+                replace: true
+              });
             }, 1500);
           } else if (kycStatus === 'failed') {
             setStatus('failed');

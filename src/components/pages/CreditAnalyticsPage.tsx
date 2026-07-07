@@ -6,30 +6,56 @@ import { Loader2, CheckCircle, XCircle, ArrowRight } from 'lucide-react';
 import { apiService } from '../../services/api';
 import { toast } from 'sonner';
 
+function isEmploymentVerifiedResponse(response: any): boolean {
+  const data = response?.data;
+  return response?.success === true && data?.verified === true;
+}
+
+function needsEmploymentVerificationResponse(response: any): boolean {
+  return (
+    response?.employment_verification_required === true ||
+    (response?.status === 'error' &&
+      typeof response?.message === 'string' &&
+      response.message.toLowerCase().includes('employment verification'))
+  );
+}
+
 export const CreditAnalyticsPage = () => {
   const navigate = useNavigate();
-  
+  const [searchParams] = useSearchParams();
+  const applicationIdParam = searchParams.get('applicationId');
+
   const [creditData, setCreditData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [performingCheck, setPerformingCheck] = useState(false);
   const [dataFetched, setDataFetched] = useState(false);
   const [redirectCountdown, setRedirectCountdown] = useState<number | null>(null);
 
+  const redirectToEmploymentVerification = (appId?: string | null) => {
+    const id = appId || applicationIdParam;
+    const route = id
+      ? `/loan-application/employment-verification?applicationId=${id}`
+      : '/loan-application/employment-verification';
+    navigate(route, { replace: true });
+  };
+
   // Auto-fetch credit analytics data on mount, and if no data exists, auto-perform credit check
   useEffect(() => {
     const initializeCreditCheck = async () => {
       try {
-        const evStatus = await apiService.getEmploymentVerificationStatus(undefined, {
-          cache: false,
-          skipDeduplication: true
-        });
-        if (!evStatus.success || !evStatus.data?.verified) {
+        const evStatus = await apiService.getEmploymentVerificationStatus(
+          applicationIdParam || undefined,
+          { cache: false, skipDeduplication: true }
+        );
+        if (!isEmploymentVerifiedResponse(evStatus)) {
+          console.log('[CreditAnalytics] Employment not verified — redirecting', evStatus);
           toast.info('Please complete employment verification first');
-          navigate('/loan-application/employment-verification', { replace: true });
+          redirectToEmploymentVerification(applicationIdParam);
           return;
         }
-      } catch {
-        navigate('/loan-application/employment-verification', { replace: true });
+      } catch (error) {
+        console.warn('[CreditAnalytics] Employment status check failed — redirecting', error);
+        redirectToEmploymentVerification(applicationIdParam);
         return;
       }
 
@@ -38,16 +64,22 @@ export const CreditAnalyticsPage = () => {
         setLoading(true);
         const response = await apiService.getCreditAnalyticsData();
         if (response.status === 'success' && response.data) {
-          // Data exists, use it
           setCreditData(response.data);
           setDataFetched(true);
           setLoading(false);
         } else {
-          // No data exists, auto-perform credit check
           setDataFetched(false);
           setPerformingCheck(true);
           try {
             const checkResponse = await apiService.performCreditCheck();
+
+            if (needsEmploymentVerificationResponse(checkResponse)) {
+              console.log('[CreditAnalytics] Credit check blocked — employment required');
+              toast.info('Please complete employment verification first');
+              redirectToEmploymentVerification(applicationIdParam);
+              return;
+            }
+
             if (checkResponse.status === 'success') {
               // Handle both boolean and number (0/1) formats from database
               const isEligible = checkResponse.data?.is_eligible === true || 
@@ -117,12 +149,22 @@ export const CreditAnalyticsPage = () => {
                 setDataFetched(true);
               }
             } else {
+              if (needsEmploymentVerificationResponse(checkResponse)) {
+                toast.info('Please complete employment verification first');
+                redirectToEmploymentVerification(applicationIdParam);
+                return;
+              }
               toast.error(checkResponse.message || 'Failed to perform credit check');
               setCreditData(null);
               setDataFetched(true);
             }
           } catch (checkError: any) {
             console.error('Error performing credit check:', checkError);
+            if (needsEmploymentVerificationResponse(checkError)) {
+              toast.info('Please complete employment verification first');
+              redirectToEmploymentVerification(applicationIdParam);
+              return;
+            }
             toast.error(checkError.message || 'Failed to perform credit check');
             setCreditData(null);
             setDataFetched(true);
@@ -140,7 +182,7 @@ export const CreditAnalyticsPage = () => {
     };
 
     initializeCreditCheck();
-  }, []);
+  }, [applicationIdParam, navigate]);
 
   // Handle redirect based on credit score
   useEffect(() => {
@@ -310,7 +352,12 @@ export const CreditAnalyticsPage = () => {
             <XCircle className="w-16 h-16 text-red-400 mx-auto mb-4" />
             <h2 className="text-2xl font-semibold text-gray-900 mb-2">Credit Check Failed</h2>
             <p className="text-gray-600 mb-6">Unable to fetch your credit report. Please try again later.</p>
-            <p className="text-sm text-gray-500">Redirecting to hold status...</p>
+            <Button
+              variant="outline"
+              onClick={() => redirectToEmploymentVerification(applicationIdParam)}
+            >
+              Go to Employment Verification
+            </Button>
           </div>
         </Card>
       </div>
