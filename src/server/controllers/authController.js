@@ -4,6 +4,7 @@ const { findUserByMobileNumber, findUserById, createUser, updateLastLogin, getPr
 const { releaseExpiredHoldIfNeeded } = require('../middleware/checkHoldStatus');
 const { initializeDatabase, executeQuery } = require('../config/database');
 const { smsService } = require('../utils/smsService');
+const { isMobileWhitelisted } = require('../middleware/otpMobileWhitelist');
 
 // Try to load loginDataParser, but don't fail if it doesn't exist
 let extractLoginData = null;
@@ -116,9 +117,10 @@ const sendOtp = async (req, res) => {
       });
     }
 
-    // Per-mobile throttle: 60-second cooldown + max 5 OTPs per 24 hours
+    // Per-mobile throttle: 60-second cooldown + max 5 OTPs per 24 hours (whitelisted mobiles skip)
     const redisClient = getRedisClient();
-    if (redisClient) {
+    const whitelisted = await isMobileWhitelisted(mobile);
+    if (redisClient && !whitelisted) {
       const cooldownKey = `otp_cooldown:${mobile}`;
       const cooldownTtl = await redisClient.ttl(cooldownKey);
       if (cooldownTtl > 0) {
@@ -192,8 +194,8 @@ const sendOtp = async (req, res) => {
       console.log(`📱 OTP (Development fallback): ${otp}`);
     }
 
-    // Update throttle counters after OTP is stored
-    if (redisClient) {
+    // Update throttle counters after OTP is stored (skip for whitelisted mobiles)
+    if (redisClient && !whitelisted) {
       await redisClient.setex(`otp_cooldown:${mobile}`, 60, '1');
       const dailyKey = `otp_daily:${mobile}`;
       const newCount = await redisClient.incr(dailyKey);

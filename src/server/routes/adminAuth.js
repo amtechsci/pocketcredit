@@ -8,6 +8,7 @@ const { set, get, del, getRedisClient } = require('../config/redis');
 const { v4: uuidv4 } = require('uuid');
 const { smsService } = require('../utils/smsService');
 const { otpIpGuard } = require('../middleware/otpIpGuard');
+const { isMobileWhitelisted } = require('../middleware/otpMobileWhitelist');
 const router = express.Router();
 
 // Initialize database connection
@@ -168,9 +169,10 @@ router.post('/send-otp', otpIpGuard, async (req, res) => {
       });
     }
 
-    // Per-mobile throttle: 60-second cooldown + max 5 OTPs per 24 hours
+    // Per-mobile throttle: 60-second cooldown + max 5 OTPs per 24 hours (whitelisted mobiles skip)
     const redisClient = getRedisClient();
-    if (redisClient) {
+    const whitelisted = await isMobileWhitelisted(mobile);
+    if (redisClient && !whitelisted) {
       const cooldownKey = `admin_otp_cooldown:${mobile}`;
       const cooldownTtl = await redisClient.ttl(cooldownKey);
       if (cooldownTtl > 0) {
@@ -274,8 +276,8 @@ router.post('/send-otp', otpIpGuard, async (req, res) => {
       console.log('📱 Admin OTP (Development):', otp);
     }
 
-    // Update throttle counters after OTP is stored
-    if (redisClient) {
+    // Update throttle counters after OTP is stored (skip for whitelisted mobiles)
+    if (redisClient && !whitelisted) {
       await redisClient.setex(`admin_otp_cooldown:${mobile}`, 60, '1');
       const dailyKey = `admin_otp_daily:${mobile}`;
       const newCount = await redisClient.incr(dailyKey);

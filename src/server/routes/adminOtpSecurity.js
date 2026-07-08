@@ -2,6 +2,7 @@ const express = require('express');
 const { authenticateAdmin } = require('../middleware/auth');
 const { getRedisClient } = require('../config/redis');
 const { blockedKey, whitelistKey, BLOCKED_SET, WHITELIST_SET } = require('../middleware/otpIpGuard');
+const { mobileWhitelistKey, WHITELIST_MOBILES_SET } = require('../middleware/otpMobileWhitelist');
 
 const router = express.Router();
 router.use(authenticateAdmin);
@@ -192,6 +193,108 @@ router.delete('/whitelist', async (req, res) => {
   } catch (err) {
     console.error('Remove whitelist IP error:', err);
     res.status(500).json({ status: 'error', message: 'Failed to remove IP from whitelist' });
+  }
+});
+
+// ── GET /api/admin/otp-security/whitelisted-mobiles ────────────────────────
+router.get('/whitelisted-mobiles', async (req, res) => {
+  const client = getRedisClient();
+  if (!client) {
+    return res.status(503).json({ status: 'error', message: 'Redis unavailable' });
+  }
+
+  try {
+    const mobiles = await getSetMembers(client, WHITELIST_MOBILES_SET);
+
+    const results = await Promise.all(
+      mobiles.map(async (mobile) => {
+        const raw = await client.get(mobileWhitelistKey(mobile));
+        return raw ? { ...parseOrRaw(raw), mobile } : { mobile };
+      })
+    );
+
+    res.json({
+      status: 'success',
+      count: results.length,
+      data: results
+    });
+  } catch (err) {
+    console.error('List whitelisted mobiles error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch whitelisted mobiles' });
+  }
+});
+
+// ── POST /api/admin/otp-security/whitelist-mobile ──────────────────────────
+// Whitelist a mobile so it bypasses OTP daily/cooldown limits. Body: { mobile: "9876543210", note: "test" }
+router.post('/whitelist-mobile', async (req, res) => {
+  const client = getRedisClient();
+  if (!client) {
+    return res.status(503).json({ status: 'error', message: 'Redis unavailable' });
+  }
+
+  const { mobile, note } = req.body;
+  if (!mobile || !/^[6-9]\d{9}$/.test(mobile)) {
+    return res.status(400).json({ status: 'error', message: 'Valid 10-digit `mobile` is required' });
+  }
+
+  try {
+    const admin = req.admin || req.user || {};
+    const meta = JSON.stringify({
+      mobile,
+      whitelisted_at: new Date().toISOString(),
+      whitelisted_by: admin.email || admin.id || 'unknown',
+      note: note || ''
+    });
+
+    await client.set(mobileWhitelistKey(mobile), meta);
+    await client.sadd(WHITELIST_MOBILES_SET, mobile);
+
+    await client.del(
+      `otp_daily:${mobile}`,
+      `otp_cooldown:${mobile}`,
+      `admin_otp_daily:${mobile}`,
+      `admin_otp_cooldown:${mobile}`
+    );
+
+    console.log(`✅ [OTP Guard] Mobile whitelisted by admin ${admin.email || admin.id}: ${mobile}`);
+
+    res.json({
+      status: 'success',
+      message: `Mobile ${mobile} whitelisted for OTP`,
+      data: { mobile, note: note || '' }
+    });
+  } catch (err) {
+    console.error('Whitelist mobile error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to whitelist mobile' });
+  }
+});
+
+// ── DELETE /api/admin/otp-security/whitelist-mobile ────────────────────────
+router.delete('/whitelist-mobile', async (req, res) => {
+  const client = getRedisClient();
+  if (!client) {
+    return res.status(503).json({ status: 'error', message: 'Redis unavailable' });
+  }
+
+  const mobile = req.body.mobile || req.query.mobile;
+  if (!mobile || !/^[6-9]\d{9}$/.test(mobile)) {
+    return res.status(400).json({ status: 'error', message: 'Valid 10-digit `mobile` is required' });
+  }
+
+  try {
+    await client.del(mobileWhitelistKey(mobile));
+    await client.srem(WHITELIST_MOBILES_SET, mobile);
+
+    const admin = req.admin || req.user || {};
+    console.log(`✅ [OTP Guard] Mobile removed from whitelist by admin ${admin.email || admin.id}: ${mobile}`);
+
+    res.json({
+      status: 'success',
+      message: `Mobile ${mobile} removed from OTP whitelist`
+    });
+  } catch (err) {
+    console.error('Remove whitelist mobile error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to remove mobile from whitelist' });
   }
 });
 
