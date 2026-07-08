@@ -1111,10 +1111,10 @@ async function computeLoanCalculationResponseData(loanId, opts = {}) {
             if (schedule && schedule.length > 0) {
               const updatedEmiSchedule = schedule.map((instalment, idx) => {
                 const instalmentNo = instalment.instalment_no || instalment.emi_number || idx + 1;
-                const storedEmi = (Array.isArray(emiScheduleArray)
-                  ? (emiScheduleArray.find(e =>
+                const storedEmi = (Array.isArray(storedEmiSchedule)
+                  ? (storedEmiSchedule.find(e =>
                       e.instalment_no === instalmentNo || e.emi_number === instalmentNo
-                    ) || emiScheduleArray[idx])
+                    ) || storedEmiSchedule[idx])
                   : null) || {};
 
                 const entry = {

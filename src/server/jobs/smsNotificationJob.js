@@ -158,12 +158,17 @@ async function initSmsLogsTable() {
 /**
  * Log SMS sent
  */
+function resolveLoanId(loan) {
+  if (!loan) return null;
+  return loan.id ?? loan.loan_id ?? null;
+}
+
 async function logSMSSent(userId, loanId, templateKey, mobile, message, status, response) {
   try {
     await executeQuery(`
       INSERT INTO sms_logs (user_id, loan_id, template_id, mobile, message, status, response, sent_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
-    `, [userId, loanId, templateKey, mobile, message, status, JSON.stringify(response)]);
+    `, [userId, loanId ?? null, templateKey, mobile, message, status, JSON.stringify(response)]);
   } catch (error) {
     await cronLogger.error(`SMS notification: Error logging SMS to database: ${error.message}`, error);
   }
@@ -173,6 +178,7 @@ async function logSMSSent(userId, loanId, templateKey, mobile, message, status, 
  * Send SMS to a user (or log in dry-run mode)
  */
 async function sendSMSToUser(user, loan, template, message) {
+  const loanId = resolveLoanId(loan);
   const mobiles = [];
   
   // Primary phone
@@ -205,7 +211,7 @@ async function sendSMSToUser(user, loan, template, message) {
         if (DRY_RUN) {
           await cronLogger.info(`SMS notification (DRY-RUN): Would skip - DLT Template ID not configured for ${template.template_key}`);
         } else {
-          await logSMSSent(user.id, loan?.id, `${template.template_key}_${mobile.type}`, mobile.number, message, 'skipped', { reason: 'DLT Template ID not configured' });
+          await logSMSSent(user.id, loanId, `${template.template_key}_${mobile.type}`, mobile.number, message, 'skipped', { reason: 'DLT Template ID not configured' });
           await cronLogger.info(`SMS notification: Skipped ${template.template_key} - DLT Template ID not configured`);
         }
         continue;
@@ -225,7 +231,7 @@ async function sendSMSToUser(user, loan, template, message) {
           mobile: mobile.number,
           userId: user.id,
           userName: `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'N/A',
-          loanId: loan?.id || null,
+          loanId,
           loanStatus: loan?.status || null,
           loanAmount: loan?.loan_amount || null,
           message: message,
@@ -235,7 +241,7 @@ async function sendSMSToUser(user, loan, template, message) {
         await cronLogger.info(`SMS notification (DRY-RUN): Would send ${template.template_key} to ${mobile.number}`, dryRunDetails);
         
         // Still log to database in dry-run mode for tracking
-        await logSMSSent(user.id, loan?.id, `${template.template_key}_${mobile.type}`, mobile.number, message, 'dry_run', { 
+        await logSMSSent(user.id, loanId, `${template.template_key}_${mobile.type}`, mobile.number, message, 'dry_run', { 
           dryRun: true,
           templateName: template.template_name,
           category: template.category,
@@ -252,7 +258,7 @@ async function sendSMSToUser(user, loan, template, message) {
           senderId: template.sender_id || 'PKTCRD'
         });
         
-        await logSMSSent(user.id, loan?.id, `${template.template_key}_${mobile.type}`, mobile.number, message, result.success ? 'sent' : 'failed', result);
+        await logSMSSent(user.id, loanId, `${template.template_key}_${mobile.type}`, mobile.number, message, result.success ? 'sent' : 'failed', result);
         
         if (result.success) {
           sentCount++;
@@ -264,7 +270,7 @@ async function sendSMSToUser(user, loan, template, message) {
     } catch (error) {
       await cronLogger.error(`SMS notification: Error sending SMS to ${mobile.number}: ${error.message}`, error);
       if (!DRY_RUN) {
-        await logSMSSent(user.id, loan?.id, `${template.template_key}_${mobile.type}`, mobile.number, message, 'error', { error: error.message });
+        await logSMSSent(user.id, loanId, `${template.template_key}_${mobile.type}`, mobile.number, message, 'error', { error: error.message });
       }
     }
   }
