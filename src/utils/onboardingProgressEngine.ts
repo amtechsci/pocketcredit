@@ -61,8 +61,8 @@ export interface OnboardingProgress {
 export const STEP_ORDER: OnboardingStep[] = [
   'application',           // Step 1: Create loan application
   'kyc-verification',      // Step 2: Complete KYC verification
-  'pan-verification',      // Step 2.5: PAN verification (after KYC)
-  'employment-verification', // Step 2.75: Employment verification
+  'employment-verification', // Step 2.75: Employment verification (before credit analytics)
+  'pan-verification',      // Step 2.5: PAN verification fallback (legacy KYC page flow)
   'aa-consent',            // Step 3: Account Aggregator consent
   'credit-analytics',      // Step 4: Credit analytics check
   'employment-details',    // Step 5: Employment details

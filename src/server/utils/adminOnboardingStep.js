@@ -7,8 +7,8 @@
 const ONBOARDING_STEP_ORDER = [
   'application',
   'kyc-verification',
-  'pan-verification',
   'employment-verification',
+  'pan-verification',
   'credit-analytics',
   'employment-details',
   'bank-statement',

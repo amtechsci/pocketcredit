@@ -12,11 +12,18 @@ function isEmploymentVerifiedResponse(response: any): boolean {
 }
 
 function needsEmploymentVerificationResponse(response: any): boolean {
+  if (!response) return false;
+  if (response.employment_verification_required === true) return true;
+  if (response.response?.employment_verification_required === true) return true;
+  const message =
+    typeof response.message === 'string'
+      ? response.message
+      : typeof response.response?.message === 'string'
+        ? response.response.message
+        : '';
   return (
-    response?.employment_verification_required === true ||
-    (response?.status === 'error' &&
-      typeof response?.message === 'string' &&
-      response.message.toLowerCase().includes('employment verification'))
+    response.status === 'error' &&
+    message.toLowerCase().includes('employment verification')
   );
 }
 
@@ -30,8 +37,10 @@ export const CreditAnalyticsPage = () => {
   const [performingCheck, setPerformingCheck] = useState(false);
   const [dataFetched, setDataFetched] = useState(false);
   const [redirectCountdown, setRedirectCountdown] = useState<number | null>(null);
+  const [redirectingToEmployment, setRedirectingToEmployment] = useState(false);
 
   const redirectToEmploymentVerification = (appId?: string | null) => {
+    setRedirectingToEmployment(true);
     const id = appId || applicationIdParam;
     const route = id
       ? `/loan-application/employment-verification?applicationId=${id}`
@@ -154,13 +163,15 @@ export const CreditAnalyticsPage = () => {
                 redirectToEmploymentVerification(applicationIdParam);
                 return;
               }
+              console.error('[CreditAnalytics] Credit check failed:', checkResponse);
               toast.error(checkResponse.message || 'Failed to perform credit check');
               setCreditData(null);
               setDataFetched(true);
             }
           } catch (checkError: any) {
             console.error('Error performing credit check:', checkError);
-            if (needsEmploymentVerificationResponse(checkError)) {
+            const errPayload = checkError?.response?.data ?? checkError;
+            if (needsEmploymentVerificationResponse(errPayload)) {
               toast.info('Please complete employment verification first');
               redirectToEmploymentVerification(applicationIdParam);
               return;
@@ -328,35 +339,45 @@ export const CreditAnalyticsPage = () => {
   };
 
   // Show loading/checking state
-  if (loading || performingCheck) {
+  if (loading || performingCheck || redirectingToEmployment) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <Card className="p-8 w-full max-w-2xl">
           <div className="flex flex-col items-center justify-center py-12">
             <Loader2 className="w-12 h-12 animate-spin text-blue-600 mb-4" />
-            <h2 className="text-2xl font-semibold text-gray-900 mb-2">Credit Analytics</h2>
-            <p className="text-gray-600 text-lg">Checking credit...</p>
-            <p className="text-sm text-gray-500 mt-2">This may take 10-15 seconds</p>
+            <h2 className="text-2xl font-semibold text-gray-900 mb-2">
+              {redirectingToEmployment ? 'Employment Verification Required' : 'Credit Analytics'}
+            </h2>
+            <p className="text-gray-600 text-lg">
+              {redirectingToEmployment
+                ? 'Redirecting to employment verification...'
+                : 'Checking credit...'}
+            </p>
+            {!redirectingToEmployment && (
+              <p className="text-sm text-gray-500 mt-2">This may take 10-15 seconds</p>
+            )}
           </div>
         </Card>
       </div>
     );
   }
 
-  // If no data after checking, show error state
+  // If no data after checking, show retry UI (not hold — hold only applies when score <= 450)
   if (!creditData && dataFetched) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <Card className="p-8 w-full max-w-2xl">
           <div className="text-center">
             <XCircle className="w-16 h-16 text-red-400 mx-auto mb-4" />
-            <h2 className="text-2xl font-semibold text-gray-900 mb-2">Credit Check Failed</h2>
-            <p className="text-gray-600 mb-6">Unable to fetch your credit report. Please try again later.</p>
+            <h2 className="text-2xl font-semibold text-gray-900 mb-2">Credit Check Unavailable</h2>
+            <p className="text-gray-600 mb-6">
+              We could not fetch your credit report right now. Please try again in a few minutes.
+            </p>
             <Button
               variant="outline"
-              onClick={() => redirectToEmploymentVerification(applicationIdParam)}
+              onClick={() => window.location.reload()}
             >
-              Go to Employment Verification
+              Try Again
             </Button>
           </div>
         </Card>

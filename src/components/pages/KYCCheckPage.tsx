@@ -30,23 +30,12 @@ export const KYCCheckPage: React.FC = () => {
           const kycStatus = response.data.kyc_status;
 
           if (kycStatus === 'verified') {
-            try {
-              const txn = response.data?.verification_data?.transactionId;
-              if (txn) {
-                await apiService.digilockerGetDetails(txn);
-                await apiService.digilockerListDocs(txn);
-              }
-            } catch (e) {
-              console.warn('KYC details/docs fetch warning:', e);
-            }
-            setStatus('verified');
+            // Webhook already fetches and persists KYC docs — skip redundant get-details/list-docs
             toast.success('KYC verification successful!');
-
-            setTimeout(() => {
-              navigate(`/loan-application/employment-verification?applicationId=${applicationId}`, {
-                replace: true
-              });
-            }, 1500);
+            navigate(`/loan-application/employment-verification?applicationId=${applicationId}`, {
+              replace: true
+            });
+            return;
           } else if (kycStatus === 'failed') {
             setStatus('failed');
             toast.error('KYC verification failed');
