@@ -69,6 +69,7 @@ interface LoanApplication {
     isOverdue: boolean;
   };
   dpd?: number; // Days Past Due (account_manager/overdue only)
+  uanStatus?: string;
 }
 
 interface ProfileComment {
@@ -1684,18 +1685,36 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
                     />
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <button
-                      onClick={() => handleViewDetails(application)}
-                      className="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
-                    >
-                      {(() => {
-                        // PLL + loan_application.id (unique)
-                        if (application.shortLoanId) return application.shortLoanId;
-                        if (application.id != null) return `PLL${application.id}`;
-                        if (application.loanId) return `PLL${application.loanId}`;
-                        return 'PLL—';
-                      })()}
-                    </button>
+                    <div className="flex flex-col gap-1">
+                      <button
+                        onClick={() => handleViewDetails(application)}
+                        className="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline cursor-pointer text-left"
+                      >
+                        {(() => {
+                          if (application.shortLoanId) return application.shortLoanId;
+                          if (application.id != null) return `PLL${application.id}`;
+                          if (application.loanId) return `PLL${application.loanId}`;
+                          return 'PLL—';
+                        })()}
+                      </button>
+                      {statusFilter === 'submitted' && application.uanStatus && application.uanStatus !== '—' && (
+                        <span
+                          className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                            application.uanStatus === 'Verified'
+                              ? 'bg-green-100 text-green-800'
+                              : application.uanStatus === 'Docs Verify'
+                                ? 'bg-amber-100 text-amber-800'
+                                : application.uanStatus === 'UAN Fetched'
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : application.uanStatus === 'UAN Not Found'
+                                    ? 'bg-red-100 text-red-800'
+                                    : 'bg-gray-100 text-gray-700'
+                          }`}
+                        >
+                          UAN: {application.uanStatus}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">

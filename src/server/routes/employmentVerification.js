@@ -4,7 +4,7 @@ const nodemailer = require('nodemailer');
 const router = express.Router();
 const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
-const { uploadLoanDocument } = require('../services/s3Service');
+const { uploadLoanDocument, resolveUploadFilePath } = require('../services/s3Service');
 const {
   resolveLoanApplicationId,
   getOrCreateRecord,
@@ -15,6 +15,7 @@ const {
   getLatestRecord,
   assertNotAwaitingDocsReview
 } = require('../services/employmentVerificationService');
+const { isUANSuccess } = require('../constants/employmentVerificationCodes');
 const { isBlockedEmailDomain } = require('../constants/employmentVerificationCodes');
 
 const transporter = nodemailer.createTransport({
@@ -28,14 +29,40 @@ const transporter = nodemailer.createTransport({
   tls: { rejectUnauthorized: false }
 });
 
+const EMPLOYMENT_DOC_EXTENSIONS = ['jpg', 'jpeg', 'png', 'pdf', 'heic', 'heif', 'webp'];
+const EMPLOYMENT_DOC_MIMES = [
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'application/pdf',
+  'image/heic',
+  'image/heif',
+  'image/webp',
+  'application/octet-stream'
+];
+
+function getFileExtension(fileName) {
+  return (fileName || '').split('.').pop()?.toLowerCase() || '';
+}
+
+function isAllowedEmploymentDocument(file) {
+  const ext = getFileExtension(file.originalname);
+  if (EMPLOYMENT_DOC_MIMES.includes(file.mimetype)) {
+    if (file.mimetype === 'application/octet-stream') {
+      return EMPLOYMENT_DOC_EXTENSIONS.includes(ext);
+    }
+    return true;
+  }
+  return EMPLOYMENT_DOC_EXTENSIONS.includes(ext);
+}
+
 const storage = multer.memoryStorage();
 const upload = multer({
   storage,
   limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE, 10) || 50 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
-    if (allowed.includes(file.mimetype)) cb(null, true);
-    else cb(new Error('Invalid file type. Only JPG, PNG, and PDF files are allowed.'));
+    if (isAllowedEmploymentDocument(file)) cb(null, true);
+    else cb(new Error('Invalid file type. Only JPG, PNG, HEIC, WEBP, and PDF files are allowed.'));
   }
 });
 
@@ -130,6 +157,17 @@ router.post('/check-uan-by-pan', requireAuth, async (req, res) => {
         verified: true,
         shouldShowManualFlow: false,
         message: 'Employment already verified'
+      });
+    }
+
+    if (existing?.status === 'pending' && isUANSuccess(existing.uan_api_result_code)) {
+      return res.json({
+        success: true,
+        verified: false,
+        uanFetched: true,
+        requiresPayslipOnly: true,
+        shouldShowManualFlow: false,
+        message: 'UAN verified. Please upload your latest payslip to continue.'
       });
     }
 
@@ -327,14 +365,26 @@ router.post('/skip-to-manual', requireAuth, async (req, res) => {
 /**
  * POST /api/employment-verification/upload-documents
  */
-router.post(
-  '/upload-documents',
-  requireAuth,
+router.post('/upload-documents', requireAuth, (req, res, next) => {
   upload.fields([
     { name: 'payslip', maxCount: 1 },
     { name: 'company_id', maxCount: 1 }
-  ]),
-  async (req, res) => {
+  ])(req, res, (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({
+          success: false,
+          message: 'File size too large. Maximum size is 50MB.'
+        });
+      }
+      return res.status(400).json({
+        success: false,
+        message: err.message || 'Invalid file upload'
+      });
+    }
+    next();
+  });
+}, async (req, res) => {
     try {
       await initializeDatabase();
       const userId = req.userId;
@@ -357,8 +407,17 @@ router.post(
 
       const payslipFile = req.files?.payslip?.[0];
       const companyIdFile = req.files?.company_id?.[0];
+      const uploadMode = (req.body.uploadMode || 'full').toLowerCase();
+      const payslipOnly = uploadMode === 'payslip_only';
 
-      if (!payslipFile || !companyIdFile) {
+      if (!payslipFile) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please upload your payslip to proceed'
+        });
+      }
+
+      if (!payslipOnly && !companyIdFile) {
         return res.status(400).json({
           success: false,
           message: 'Please upload both documents to proceed'
@@ -367,6 +426,13 @@ router.post(
 
       const record = await getOrCreateRecord(userId, applicationId);
 
+      if (payslipOnly && !isUANSuccess(record.uan_api_result_code)) {
+        return res.status(400).json({
+          success: false,
+          message: 'UAN verification is required before uploading payslip'
+        });
+      }
+
       const payslipUpload = await uploadLoanDocument(
         payslipFile.buffer,
         payslipFile.originalname,
@@ -374,13 +440,8 @@ router.post(
         userId,
         applicationId
       );
-      const companyIdUpload = await uploadLoanDocument(
-        companyIdFile.buffer,
-        companyIdFile.originalname,
-        companyIdFile.mimetype,
-        userId,
-        applicationId
-      );
+
+      const payslipFilePath = resolveUploadFilePath(payslipUpload);
 
       const payslipInsert = await executeQuery(
         `INSERT INTO loan_application_documents
@@ -393,13 +454,51 @@ router.post(
           'Latest Payslip',
           'employment_payslip',
           payslipFile.originalname,
-          payslipUpload.url,
+          payslipFilePath,
           payslipUpload.key,
           payslipUpload.bucket,
           payslipFile.size,
           payslipFile.mimetype
         ]
       );
+
+      if (payslipOnly) {
+        await markVerified(record.id, 'uan_pan_api', {
+          pan_used: record.pan_used,
+          uan_api_result_code: record.uan_api_result_code,
+          uan_api_response: record.uan_api_response
+            ? (typeof record.uan_api_response === 'string'
+              ? JSON.parse(record.uan_api_response)
+              : record.uan_api_response)
+            : null
+        });
+
+        await executeQuery(
+          `UPDATE employment_verification_records
+           SET payslip_document_id = ?,
+               payslip_s3_key = ?,
+               updated_at = NOW()
+           WHERE id = ?`,
+          [payslipInsert.insertId, payslipUpload.key, record.id]
+        );
+
+        return res.json({
+          success: true,
+          verified: true,
+          message: 'Payslip uploaded successfully. Proceeding to credit check.',
+          redirectTo: 'credit-analytics'
+        });
+      }
+
+      const companyIdUpload = await uploadLoanDocument(
+        companyIdFile.buffer,
+        companyIdFile.originalname,
+        companyIdFile.mimetype,
+        userId,
+        applicationId
+      );
+
+      const companyIdFilePath = resolveUploadFilePath(companyIdUpload);
 
       const companyIdInsert = await executeQuery(
         `INSERT INTO loan_application_documents
@@ -412,7 +511,7 @@ router.post(
           'Company ID Card',
           'employment_company_id',
           companyIdFile.originalname,
-          companyIdUpload.url,
+          companyIdFilePath,
           companyIdUpload.key,
           companyIdUpload.bucket,
           companyIdFile.size,
@@ -441,13 +540,12 @@ router.post(
 
       res.json({
         success: true,
-        message: 'Your documents are under review & we will update the status soon'
+        message: 'Your documents are under verification. We will get back to you soon.'
       });
     } catch (error) {
       console.error('upload-documents error:', error);
       res.status(500).json({ success: false, message: error.message || 'Failed to upload documents' });
     }
-  }
-);
+  });
 
 module.exports = router;

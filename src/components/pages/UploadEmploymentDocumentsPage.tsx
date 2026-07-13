@@ -6,17 +6,24 @@ import { Label } from '../ui/label';
 import { Upload, Loader2, FileText, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../services/api';
+import { getOnboardingProgress, getStepRoute } from '../../utils/onboardingProgressEngine';
 
 export const UploadEmploymentDocumentsPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const applicationId = searchParams.get('applicationId');
+  const uploadMode = searchParams.get('mode') === 'payslip_only' ? 'payslip_only' : 'full';
+  const payslipOnly = uploadMode === 'payslip_only';
   const [payslip, setPayslip] = useState<File | null>(null);
   const [companyId, setCompanyId] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async () => {
-    if (!payslip || !companyId) {
+    if (!payslip) {
+      toast.error('Please upload your payslip to proceed');
+      return;
+    }
+    if (!payslipOnly && !companyId) {
       toast.error('Please upload both documents to proceed');
       return;
     }
@@ -25,7 +32,10 @@ export const UploadEmploymentDocumentsPage: React.FC = () => {
     try {
       const formData = new FormData();
       formData.append('payslip', payslip);
-      formData.append('company_id', companyId);
+      formData.append('uploadMode', uploadMode);
+      if (!payslipOnly && companyId) {
+        formData.append('company_id', companyId);
+      }
       if (applicationId) {
         formData.append('applicationId', applicationId);
       }
@@ -33,7 +43,18 @@ export const UploadEmploymentDocumentsPage: React.FC = () => {
       const response = await apiService.uploadEmploymentDocuments(formData);
       if (response.success) {
         toast.success(response.message || 'Documents submitted successfully');
-        navigate(`/loan-application/employment-docs-pending${applicationId ? `?applicationId=${applicationId}` : ''}`, { replace: true });
+
+        if (payslipOnly || response.verified) {
+          const appId = applicationId ? parseInt(applicationId, 10) : null;
+          const progress = await getOnboardingProgress(appId, true);
+          navigate(getStepRoute(progress.currentStep, appId, progress.prerequisites), { replace: true });
+          return;
+        }
+
+        navigate(
+          `/loan-application/employment-docs-pending${applicationId ? `?applicationId=${applicationId}` : ''}`,
+          { replace: true }
+        );
       } else {
         toast.error(response.message || 'Failed to upload documents');
       }
@@ -61,7 +82,7 @@ export const UploadEmploymentDocumentsPage: React.FC = () => {
         <input
           id={id}
           type="file"
-          accept=".jpg,.jpeg,.png,.pdf"
+          accept=".jpg,.jpeg,.png,.pdf,.heic,.heif,.webp,image/*,application/pdf"
           className="hidden"
           onChange={(e) => onChange(e.target.files?.[0] || null)}
         />
@@ -75,7 +96,7 @@ export const UploadEmploymentDocumentsPage: React.FC = () => {
           ) : (
             <>
               <Upload className="w-8 h-8 text-gray-400" />
-              <span className="text-sm text-gray-600">Click to upload (JPG, PNG, PDF)</span>
+              <span className="text-sm text-gray-600">Click to upload (JPG, PNG, PDF, HEIC)</span>
             </>
           )}
         </label>
@@ -92,8 +113,14 @@ export const UploadEmploymentDocumentsPage: React.FC = () => {
         </Button>
         <Card className="shadow-lg">
           <CardHeader>
-            <CardTitle className="text-xl text-center">UPLOAD EMPLOYMENT DOCUMENTS</CardTitle>
-            <p className="text-sm text-gray-600 text-center">Upload both documents to proceed with verification</p>
+            <CardTitle className="text-xl text-center">
+              {payslipOnly ? 'UPLOAD PAYSLIP' : 'UPLOAD EMPLOYMENT DOCUMENTS'}
+            </CardTitle>
+            <p className="text-sm text-gray-600 text-center">
+              {payslipOnly
+                ? 'Your UAN was verified. Upload your latest payslip to continue.'
+                : 'Upload both documents to proceed with verification'}
+            </p>
           </CardHeader>
           <CardContent className="space-y-6">
             <FileField
@@ -102,12 +129,14 @@ export const UploadEmploymentDocumentsPage: React.FC = () => {
               file={payslip}
               onChange={setPayslip}
             />
-            <FileField
-              id="company_id"
-              label="Company ID card"
-              file={companyId}
-              onChange={setCompanyId}
-            />
+            {!payslipOnly && (
+              <FileField
+                id="company_id"
+                label="Company ID card"
+                file={companyId}
+                onChange={setCompanyId}
+              />
+            )}
             <Button onClick={handleSubmit} disabled={submitting} className="w-full">
               {submitting ? (
                 <>
@@ -115,7 +144,7 @@ export const UploadEmploymentDocumentsPage: React.FC = () => {
                   Submitting...
                 </>
               ) : (
-                'Submit Documents'
+                payslipOnly ? 'Submit Payslip' : 'Submit Documents'
               )}
             </Button>
           </CardContent>

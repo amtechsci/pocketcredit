@@ -288,7 +288,7 @@ const ProfileCompletionPageSimple = () => {
           // Fallback to default ranges if API returns empty or invalid data
           setIncomeRanges([
             { value: '1k-20k', label: '₹1,000 to ₹20,000', min_salary: 1000, max_salary: 20000, loan_limit: 10000, hold_permanent: true, tier_name: 'Basic' },
-            { value: '20k-30k', label: '₹20,000 to ₹30,000', min_salary: 20000, max_salary: 30000, loan_limit: 15000, hold_permanent: false, tier_name: 'Standard' },
+            { value: '20k-30k', label: '₹20,000 to ₹30,000', min_salary: 20000, max_salary: 30000, loan_limit: 15000, hold_permanent: true, tier_name: 'Standard' },
             { value: '30k-40k', label: '₹30,000 to ₹40,000', min_salary: 30000, max_salary: 40000, loan_limit: 25000, hold_permanent: false, tier_name: 'Premium' },
             { value: 'above-40k', label: 'Above ₹40,000', min_salary: 40000, max_salary: null, loan_limit: 50000, hold_permanent: false, tier_name: 'Elite' }
           ]);
@@ -298,7 +298,7 @@ const ProfileCompletionPageSimple = () => {
         // Fallback to default ranges if API fails
         setIncomeRanges([
           { value: '1k-20k', label: '₹1,000 to ₹20,000', min_salary: 1000, max_salary: 20000, loan_limit: 10000, hold_permanent: true, tier_name: 'Basic' },
-          { value: '20k-30k', label: '₹20,000 to ₹30,000', min_salary: 20000, max_salary: 30000, loan_limit: 15000, hold_permanent: false, tier_name: 'Standard' },
+          { value: '20k-30k', label: '₹20,000 to ₹30,000', min_salary: 20000, max_salary: 30000, loan_limit: 15000, hold_permanent: true, tier_name: 'Standard' },
           { value: '30k-40k', label: '₹30,000 to ₹40,000', min_salary: 30000, max_salary: 40000, loan_limit: 25000, hold_permanent: false, tier_name: 'Premium' },
           { value: 'above-40k', label: 'Above ₹40,000', min_salary: 40000, max_salary: null, loan_limit: 50000, hold_permanent: false, tier_name: 'Elite' }
         ]);

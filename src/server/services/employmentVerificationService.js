@@ -133,16 +133,20 @@ async function checkUANByPAN(userId, mobile, pan, loanApplicationId) {
   });
 
   if (result.success && isUANSuccess(resultCode)) {
-    await markVerified(record.id, 'uan_pan_api', {
-      pan_used: pan,
-      uan_api_result_code: resultCode,
-      uan_api_response: result.data
-    });
+    // UAN fetched — user must upload payslip before proceeding to credit check
+    await executeQuery(
+      `UPDATE employment_verification_records
+       SET method = 'uan_pan_api', updated_at = NOW()
+       WHERE id = ?`,
+      [record.id]
+    );
     return {
       success: true,
-      verified: true,
+      verified: false,
+      uanFetched: true,
+      requiresPayslipOnly: true,
       result_code: resultCode,
-      message,
+      message: message || 'UAN verified. Please upload your latest payslip to continue.',
       shouldShowManualFlow: false,
       data: result.data
     };
@@ -260,9 +264,14 @@ async function getEmploymentVerificationStatus(userId, loanApplicationId) {
       status: 'pending',
       verified: false,
       docs_verify: false,
+      uan_fetched: false,
+      requires_payslip_only: false,
       method: null
     };
   }
+
+  const uanFetched = isUANSuccess(record.uan_api_result_code);
+  const requiresPayslipOnly = record.status === 'pending' && uanFetched;
 
   return {
     loan_application_id: appId,
@@ -270,6 +279,8 @@ async function getEmploymentVerificationStatus(userId, loanApplicationId) {
     status: record.status,
     verified: record.status === 'verified',
     docs_verify: record.status === 'docs_verify',
+    uan_fetched: uanFetched,
+    requires_payslip_only: requiresPayslipOnly,
     method: record.method,
     company_email: record.company_email,
     uan_number: record.uan_number,

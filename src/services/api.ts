@@ -1898,7 +1898,14 @@ class ApiService {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: formData
     });
-    return response.json();
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(data.message || 'Failed to upload documents');
+    }
+
+    return data;
   }
 
   /**

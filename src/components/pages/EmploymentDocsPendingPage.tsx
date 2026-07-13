@@ -53,7 +53,7 @@ export const EmploymentDocsPendingPage: React.FC = () => {
         <CardContent className="text-center space-y-4">
           <CheckCircle className="w-16 h-16 mx-auto text-amber-500" />
           <p className="text-lg font-medium text-gray-900">
-            Your documents are under review &amp; we will update the status soon
+            Your documents are under verification. We will get back to you soon.
           </p>
           <p className="text-sm text-gray-600">
             Our team is reviewing your employment documents. Please wait here — you cannot proceed until an admin approves your documents.

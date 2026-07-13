@@ -39,6 +39,7 @@ export interface OnboardingPrerequisites {
   panVerified: boolean;
   employmentVerificationCompleted: boolean;
   employmentDocsVerifyPending: boolean;
+  employmentUanFetchedPendingPayslip: boolean;
   aaConsentGiven: boolean;
   creditAnalyticsCompleted: boolean;
   employmentCompleted: boolean;
@@ -107,6 +108,7 @@ export async function checkAllPrerequisites(
     panVerified: false,
     employmentVerificationCompleted: false,
     employmentDocsVerifyPending: false,
+    employmentUanFetchedPendingPayslip: false,
     aaConsentGiven: false,
     creditAnalyticsCompleted: false,
     employmentCompleted: false,
@@ -172,10 +174,13 @@ export async function checkAllPrerequisites(
         if (evResponse.success && evResponse.data) {
           prerequisites.employmentVerificationCompleted = evResponse.data.verified === true;
           prerequisites.employmentDocsVerifyPending = evResponse.data.docs_verify === true;
+          prerequisites.employmentUanFetchedPendingPayslip =
+            evResponse.data.requires_payslip_only === true;
         } else if ((evResponse as any).status === 'success' && (evResponse as any).data) {
           const data = (evResponse as any).data;
           prerequisites.employmentVerificationCompleted = data.verified === true;
           prerequisites.employmentDocsVerifyPending = data.docs_verify === true;
+          prerequisites.employmentUanFetchedPendingPayslip = data.requires_payslip_only === true;
         }
       } catch (error) {
         console.error('[ProgressEngine] Error checking employment verification:', error);
@@ -703,6 +708,7 @@ export async function getOnboardingProgress(
         panVerified: false,
         employmentVerificationCompleted: false,
         employmentDocsVerifyPending: false,
+        employmentUanFetchedPendingPayslip: false,
         aaConsentGiven: false,
         creditAnalyticsCompleted: false,
         employmentCompleted: false,
@@ -744,6 +750,9 @@ function getStepReason(prerequisites: OnboardingPrerequisites, step: OnboardingS
     case 'employment-verification':
       if (prerequisites.employmentDocsVerifyPending) {
         return 'Employment documents under admin review';
+      }
+      if (prerequisites.employmentUanFetchedPendingPayslip) {
+        return 'UAN verified — payslip upload pending';
       }
       return 'Employment verification not completed';
     case 'aa-consent':
@@ -798,7 +807,10 @@ export async function getPostKycRoute(applicationId: number | null): Promise<str
 export function getStepRoute(
   step: OnboardingStep,
   applicationId?: number | null,
-  prerequisites?: Pick<OnboardingPrerequisites, 'employmentDocsVerifyPending'>
+  prerequisites?: Pick<
+    OnboardingPrerequisites,
+    'employmentDocsVerifyPending' | 'employmentUanFetchedPendingPayslip'
+  >
 ): string {
   // User uploaded docs — must wait for admin; always show pending screen
   if (
@@ -810,6 +822,18 @@ export function getStepRoute(
       return `${pendingRoute}?applicationId=${applicationId}`;
     }
     return pendingRoute;
+  }
+
+  // UAN fetched — payslip-only upload before credit check
+  if (
+    step === 'employment-verification' &&
+    prerequisites?.employmentUanFetchedPendingPayslip
+  ) {
+    const uploadRoute = '/loan-application/upload-employment-documents?mode=payslip_only';
+    if (applicationId) {
+      return `${uploadRoute}&applicationId=${applicationId}`;
+    }
+    return uploadRoute;
   }
 
   const baseRoute = STEP_ROUTES[step];

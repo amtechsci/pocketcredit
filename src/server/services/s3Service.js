@@ -371,6 +371,23 @@ async function uploadLoanDocument(fileBuffer, fileName, mimeType, userId, loanId
   });
 }
 
+/**
+ * Resolve a non-null file_path for DB storage (CreditLab uploads have url=null).
+ */
+function resolveUploadFilePath(uploadResult) {
+  if (!uploadResult) return '';
+  if (uploadResult.url) return uploadResult.url;
+  if (uploadResult.location) return uploadResult.location;
+  if (uploadResult.key) {
+    const region = process.env.AWS_REGION || 'ap-south-1';
+    if (uploadResult.bucket) {
+      return `https://${uploadResult.bucket}.s3.${region}.amazonaws.com/${uploadResult.key}`;
+    }
+    return uploadResult.key;
+  }
+  return '';
+}
+
 async function uploadGeneratedPDF(fileBuffer, fileName, userId, documentType) {
   return uploadToS3(fileBuffer, fileName, 'application/pdf', {
     folder: 'generated-documents',
@@ -392,6 +409,7 @@ module.exports = {
   uploadProfilePicture,
   uploadLoanDocument,
   uploadGeneratedPDF,
+  resolveUploadFilePath,
   isCreditLabStorageEnabled: creditLabStorage.isCreditLabStorageEnabled,
   normalizeStorageKey: creditLabStorage.normalizeStorageKey,
 };

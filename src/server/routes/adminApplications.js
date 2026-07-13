@@ -189,7 +189,11 @@ router.get('/', authenticateAdmin, async (req, res) => {
         ar.name as recovery_officer_name,
         art.name as temp_recovery_officer_name,
         af.name as follow_up_user_name,
-        aft.name as temp_follow_up_user_name
+        aft.name as temp_follow_up_user_name,
+        ev.ev_status,
+        ev.ev_method,
+        ev.uan_api_result_code,
+        ev.uan_number as ev_uan_number
       FROM loan_applications la
       LEFT JOIN users u ON la.user_id = u.id
       LEFT JOIN (
@@ -229,6 +233,12 @@ router.get('/', authenticateAdmin, async (req, res) => {
       LEFT JOIN admins art ON la.temp_assigned_recovery_officer_id COLLATE utf8mb4_unicode_ci = art.id
       LEFT JOIN admins af ON la.assigned_follow_up_admin_id COLLATE utf8mb4_unicode_ci = af.id
       LEFT JOIN admins aft ON la.temp_assigned_follow_up_admin_id COLLATE utf8mb4_unicode_ci = aft.id
+      LEFT JOIN employment_verification_records ev ON ev.id = (
+        SELECT MAX(ev2.id)
+        FROM employment_verification_records ev2
+        WHERE ev2.user_id = la.user_id
+          AND (ev2.loan_application_id = la.id OR ev2.loan_application_id IS NULL)
+      )
     `;
 
     let whereConditions = [];
@@ -576,6 +586,16 @@ router.get('/', authenticateAdmin, async (req, res) => {
       // Loan ID: PLL + loan_application.id (unique)
       const shortLoanId = `PLL${app.id}`;
 
+      const uanStatus = (() => {
+        if (app.ev_status === 'verified') return 'Verified';
+        if (app.ev_status === 'docs_verify') return 'Docs Verify';
+        if (app.ev_status === 'pending' && Number(app.uan_api_result_code) === 101) return 'UAN Fetched';
+        if (app.uan_api_result_code && [102, 103].includes(Number(app.uan_api_result_code))) return 'UAN Not Found';
+        if (app.ev_status === 'failed') return 'Failed';
+        if (app.ev_status === 'pending') return 'Pending';
+        return '—';
+      })();
+
       let assignmentType = null;
       if (req.admin?.role === 'sub_admin' && adminId && assignedCol && tempCol) {
         if (app[assignedCol] === adminId) assignmentType = 'primary';
@@ -586,6 +606,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
         id: app.applicationNumber || app.id,
         loanId: app.applicationNumber, // Full application number for reference
         shortLoanId: shortLoanId, // Short format: PLL + 4 digits
+        uanStatus,
         userId: app.userId,
         loanAmount: parseFloat(app.loanAmount) || 0,
         loanType: app.loanType?.toLowerCase() || 'personal',

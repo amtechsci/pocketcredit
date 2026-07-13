@@ -186,6 +186,35 @@ router.post('/', requireAuth, async (req, res) => {
 
       const rangeConfig = incomeRangeConfig[0];
 
+      // Salary below ₹30,000 is not eligible (₹1,000–₹19,999 and ₹20,000–₹29,999)
+      const maxSalary = rangeConfig.max_salary ? parseFloat(rangeConfig.max_salary) : null;
+      const minSalary = parseFloat(rangeConfig.min_salary);
+      const salaryBelowMinimum =
+        maxSalary !== null
+          ? maxSalary < 30000
+          : minSalary < 30000;
+
+      if (salaryBelowMinimum || ['1k-20k', '20k-30k'].includes(income_range)) {
+        const salaryRange = rangeConfig.max_salary
+          ? `₹${parseInt(rangeConfig.min_salary).toLocaleString('en-IN')} to ₹${parseInt(rangeConfig.max_salary).toLocaleString('en-IN')}`
+          : `₹${parseInt(rangeConfig.min_salary).toLocaleString('en-IN')} and above`;
+
+        await executeQuery(
+          'UPDATE users SET status = ?, eligibility_status = ?, application_hold_reason = ?, profile_completion_step = 1, updated_at = NOW() WHERE id = ?',
+          ['on_hold', 'not_eligible', `Application held: Gross monthly income ${salaryRange} (minimum ₹30,000 required)`, userId]
+        );
+
+        return res.json({
+          success: true,
+          data: {
+            eligible: false,
+            message: 'Sorry, applicants with gross monthly income below ₹30,000 are not eligible at this time',
+            hold_reason: `Gross monthly income ${salaryRange}`,
+            hold_permanent: true
+          }
+        });
+      }
+
       // Check if this income range requires permanent hold
       if (rangeConfig.hold_permanent === 1) {
         const salaryRange = rangeConfig.max_salary
