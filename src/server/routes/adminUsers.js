@@ -15,6 +15,7 @@ const {
   matchesDpdSegment,
   passesRecoveryOfficerScope
 } = require('../utils/accountManagerDpd');
+const { resolveAadhaarLinkedMobile, normalizeIndianMobile } = require('../utils/resolveAadhaarLinkedMobile');
 
 /**
  * Override raw loan_applications.current_step with computed post-disbursal step when applicable.
@@ -648,6 +649,8 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
     await initializeDatabase();
     const { id } = req.params;
     const userId = parseInt(id);
+    const overrideMobile = normalizeIndianMobile(req.body?.mobile_no || req.body?.mobile);
+    const overridePan = (req.body?.pan || '').trim().toUpperCase();
 
     if (!userId || isNaN(userId)) {
       return res.status(400).json({
@@ -681,7 +684,7 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
 
     // Get user details for credit check
     const user = await executeQuery(
-      'SELECT first_name, last_name, phone, email, pan_number, DATE_FORMAT(date_of_birth, "%Y-%m-%d") as date_of_birth FROM users WHERE id = ?',
+      'SELECT first_name, last_name, phone, aadhar_linked_mobile, email, pan_number, DATE_FORMAT(date_of_birth, "%Y-%m-%d") as date_of_birth FROM users WHERE id = ?',
       [userId]
     );
 
@@ -693,6 +696,20 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
     }
 
     const userData = user[0];
+
+    if (overridePan && /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(overridePan)) {
+      userData.pan_number = overridePan;
+    }
+
+    const aadhaarMobile = resolveAadhaarLinkedMobile(userData);
+    const mobileForCreditCheck = overrideMobile || aadhaarMobile;
+
+    if (!mobileForCreditCheck) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Aadhaar-linked mobile number is required for credit check.'
+      });
+    }
 
     // Priority 1: Check for PANCR document in kyc_documents and extract PAN via OCR
     if (!userData.pan_number) {
@@ -838,7 +855,7 @@ router.post('/:id/perform-credit-check', authenticateAdmin, async (req, res) => 
     try {
       creditReportResponse = await creditAnalyticsService.requestCreditReport({
         client_ref_num: clientRefNum,
-        mobile_no: userData.phone,
+        mobile_no: mobileForCreditCheck,
         first_name: userData.first_name || 'User',
         last_name: userData.last_name || '',
         date_of_birth: userData.date_of_birth, // YYYY-MM-DD

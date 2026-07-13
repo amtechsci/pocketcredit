@@ -6,6 +6,7 @@ import { Input } from '../ui/input';
 import { Card } from '../ui/card';
 import { toast } from 'sonner';
 import { Logo } from '../Logo';
+import { apiService } from '../../services/api';
 
 type FlowStep = 
   | 'input' 
@@ -32,6 +33,20 @@ export const AccountAggregatorFlow = () => {
   const [bankOtp, setBankOtp] = useState('');
   const [resendTimer, setResendTimer] = useState(60);
   const [selectedAccount, setSelectedAccount] = useState(true);
+
+  useEffect(() => {
+    if (initialMobile) return;
+    const loadAadhaarMobile = async () => {
+      try {
+        const profile = await apiService.getUserProfile();
+        const aadhaarMobile = profile.data?.user?.aadhar_linked_mobile;
+        if (aadhaarMobile) setMobileNumber(aadhaarMobile);
+      } catch (error) {
+        console.warn('Could not load Aadhaar-linked mobile for AA flow:', error);
+      }
+    };
+    loadAadhaarMobile();
+  }, [initialMobile]);
 
   const banks = [
     'ICICI Bank',
@@ -171,7 +186,7 @@ export const AccountAggregatorFlow = () => {
         {currentStep === 'input' && (
           <div className="p-4 space-y-4">
             <Card className="p-6 space-y-4">
-              <h3 className="text-lg font-semibold">Enter Mobile no. linked with your bank</h3>
+              <h3 className="text-lg font-semibold">Enter Aadhaar-linked mobile no.</h3>
               <Input
                 type="tel"
                 placeholder="Enter your mobile number"

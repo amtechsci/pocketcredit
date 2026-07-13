@@ -12,6 +12,7 @@ const {
   retrieveBankStatementReport
 } = require('../services/digitapBankStatementService');
 const { fetchAndSaveBankStatementReports } = require('../utils/bankStatementReportStorage');
+const { fetchAadhaarLinkedMobile, normalizeIndianMobile } = require('../utils/resolveAadhaarLinkedMobile');
 
 /**
  * Helper function to log webhook payloads to database
@@ -99,8 +100,38 @@ const upload = multer({
  * - Use Account Aggregator
  */
 router.post('/initiate', requireAuth, async (req, res) => {
-  const { mobile_number, bank_name, application_id } = req.body;
+  let { mobile_number, bank_name, application_id } = req.body;
   const userId = req.userId;
+
+  if (!application_id) {
+    return res.status(400).json({
+      success: false,
+      message: 'Application ID is required'
+    });
+  }
+
+  try {
+    await initializeDatabase();
+
+    if (!mobile_number) {
+      mobile_number = await fetchAadhaarLinkedMobile(executeQuery, userId);
+    } else {
+      mobile_number = normalizeIndianMobile(mobile_number);
+    }
+
+    if (!mobile_number) {
+      return res.status(400).json({
+        success: false,
+        message: 'Aadhaar-linked mobile number is required. Complete DigiLocker KYC first.'
+      });
+    }
+  } catch (prefillError) {
+    console.error('AA initiate mobile resolve error:', prefillError);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to resolve mobile number for account aggregator'
+    });
+  }
 
   if (!mobile_number || !application_id) {
     return res.status(400).json({
@@ -286,20 +317,15 @@ router.post('/upload-statement', requireAuth, upload.single('statement'), async 
   try {
     await initializeDatabase();
 
-    // Get user's mobile number
-    const users = await executeQuery(
-      'SELECT phone FROM users WHERE id = ?',
-      [userId]
-    );
+    // Get user's Aadhaar-linked mobile number
+    const mobileNumber = await fetchAadhaarLinkedMobile(executeQuery, userId);
 
-    if (!users || users.length === 0) {
-      return res.status(404).json({
+    if (!mobileNumber) {
+      return res.status(400).json({
         success: false,
-        message: 'User not found'
+        message: 'Aadhaar-linked mobile number is required. Complete DigiLocker KYC first.'
       });
     }
-
-    const mobileNumber = users[0].phone;
     const { generateClientRefNum } = require('../services/digitapBankStatementService');
     const clientRefNum = generateClientRefNum(userId, application_id);
 

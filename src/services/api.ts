@@ -12,6 +12,7 @@ export interface ApiResponse<T = any> {
 export interface User {
   id: number;
   phone: string;
+  aadhar_linked_mobile?: string | null;
   email?: string;
   first_name?: string;
   last_name?: string;
@@ -1265,13 +1266,13 @@ class ApiService {
   /**
    * Perform Credit Check (Experian via Digitap)
    */
-  async performCreditCheck(): Promise<ApiResponse<{
+  async performCreditCheck(data?: { mobile_no?: string; pan?: string }): Promise<ApiResponse<{
     is_eligible: boolean;
     credit_score: number | null;
     reasons: string[];
     request_id: string;
   }>> {
-    return this.request('POST', '/credit-analytics/check');
+    return this.request('POST', '/credit-analytics/check', data || {});
   }
 
   /**

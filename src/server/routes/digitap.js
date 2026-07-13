@@ -4,9 +4,10 @@ const { executeQuery, initializeDatabase } = require('../config/database');
 const { requireAuth } = require('../middleware/jwtAuth');
 const { authenticateAdmin } = require('../middleware/auth');
 const { checkHoldStatus } = require('../middleware/checkHoldStatus');
-const { fetchUserPrefillData, validatePANDetails, getUANBasic, generateUANClientRefNum } = require('../services/digitapService');
+const { fetchUserPrefillData, validatePANDetails, getUANBasic, getUANByNumber, generateUANClientRefNum } = require('../services/digitapService');
 const { saveUserInfoFromPANAPI, saveAddressFromPANAPI } = require('../services/userInfoService');
 const { compareNames } = require('../utils/nameComparison');
+const { fetchAadhaarLinkedMobile } = require('../utils/resolveAadhaarLinkedMobile');
 
 // POST /api/digitap/prefill - Fetch user data from Digitap API
 // NOTE: No checkHoldStatus here - allow fetching data even if on hold
@@ -22,25 +23,13 @@ router.post('/prefill', requireAuth, async (req, res) => {
       });
     }
 
-    // Get user's mobile number
-    const users = await executeQuery(
-      'SELECT phone FROM users WHERE id = ?',
-      [userId]
-    );
-
-    if (!users || users.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
-
-    const mobileNumber = users[0].phone;
+    const mobileNumber = await fetchAadhaarLinkedMobile(executeQuery, userId);
 
     if (!mobileNumber) {
       return res.status(400).json({
         success: false,
-        message: 'Mobile number not found for user'
+        allow_manual: true,
+        message: 'Aadhaar-linked mobile number not found. Complete DigiLocker KYC first.'
       });
     }
 
@@ -749,9 +738,9 @@ router.get('/uan/admin/stored/:userId', authenticateAdmin, async (req, res) => {
 router.post('/uan/admin/basic', authenticateAdmin, async (req, res) => {
   try {
     await initializeDatabase();
-    const { userId, mobile } = req.body;
+    const { userId, mobile, pan, uan } = req.body;
 
-    console.log('Admin UAN Basic request:', { userId, mobile });
+    console.log('Admin UAN Basic request:', { userId, mobile, pan, uan });
 
     if (!userId) {
       return res.status(400).json({
@@ -769,46 +758,52 @@ router.post('/uan/admin/basic', authenticateAdmin, async (req, res) => {
       });
     }
 
-    if (!mobile) {
+    const uanTrimmed = uan ? String(uan).trim() : '';
+    const useUanLookup = /^\d{12}$/.test(uanTrimmed);
+
+    let userPan = (pan || '').trim().toUpperCase();
+    if (!userPan || !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(userPan)) {
+      try {
+        const userRows = await executeQuery(
+          'SELECT pan_number FROM users WHERE id = ?',
+          [userIdInt]
+        );
+        if (userRows.length > 0 && userRows[0].pan_number) {
+          userPan = userRows[0].pan_number.toUpperCase();
+        } else {
+          userPan = '';
+        }
+      } catch (panError) {
+        console.error('Error fetching user PAN:', panError);
+        userPan = '';
+      }
+    }
+
+    if (!useUanLookup && !userPan) {
       return res.status(400).json({
         success: false,
-        message: 'Mobile number is required'
+        message: 'PAN number is required for UAN lookup.'
       });
     }
 
-    // Validate mobile number format
-    if (!/^[6-9]\d{9}$/.test(mobile)) {
+    if (!mobile && !useUanLookup) {
+      return res.status(400).json({
+        success: false,
+        message: 'Mobile number is required for PAN-based UAN lookup'
+      });
+    }
+
+    if (mobile && !/^[6-9]\d{9}$/.test(mobile)) {
       return res.status(400).json({
         success: false,
         message: 'Invalid mobile number format. Must be 10 digits starting with 6-9.'
       });
     }
 
-    // Fetch user's PAN from database (stored as pan_number in users table)
-    let userPan = null;
-    try {
-      const userRows = await executeQuery(`
-        SELECT pan_number FROM users WHERE id = ?
-      `, [userIdInt]);
-      if (userRows.length > 0 && userRows[0].pan_number) {
-        userPan = userRows[0].pan_number;
-      }
-      console.log('User PAN for UAN lookup:', userPan);
-    } catch (panError) {
-      console.error('Error fetching user PAN:', panError);
-      // Continue without PAN
-    }
-
-    // PAN is required for the UAN Basic API
-    if (!userPan) {
-      return res.status(400).json({
-        success: false,
-        message: 'PAN number not found for this user. PAN is required for UAN lookup.'
-      });
-    }
-
     const clientRefNum = generateUANClientRefNum(userIdInt);
-    const result = await getUANBasic(mobile, clientRefNum, userPan);
+    const result = useUanLookup
+      ? await getUANByNumber(uanTrimmed, clientRefNum)
+      : await getUANBasic(mobile, clientRefNum, userPan);
 
     // Store transaction in database
     try {
@@ -831,7 +826,12 @@ router.post('/uan/admin/basic', authenticateAdmin, async (req, res) => {
         mobile,
         status,
         resultCode || null,
-        JSON.stringify({ mobile, client_ref_num: clientRefNum, pan: userPan }),
+        JSON.stringify({
+          mobile: mobile || null,
+          client_ref_num: clientRefNum,
+          pan: userPan || null,
+          uan: useUanLookup ? uanTrimmed : null
+        }),
         JSON.stringify(result.data),
         result.error || null
       ]);

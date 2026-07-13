@@ -2605,7 +2605,10 @@ class AdminApiService {
   /**
    * UAN Basic V3 API Method (Admin version - synchronous API)
    */
-  async getUANBasic(userId: string, data: { mobile: string }): Promise<ApiResponse<any>> {
+  async getUANBasic(
+    userId: string,
+    data: { mobile?: string; pan?: string; uan?: string }
+  ): Promise<ApiResponse<any>> {
     try {
       const token = localStorage.getItem('adminToken');
       const response = await axios.post('/api/digitap/uan/admin/basic', { userId, ...data }, {

@@ -3231,6 +3231,7 @@ function UserProfileDetail() {
           <div className="bg-white border border-gray-200 rounded-lg p-4">
             <UANEmploymentInfo
               aadharLinkedMobile={userData?.aadharLinkedMobile}
+              panNumber={userData?.panNumber}
               userId={params.userId}
               maskMobile={shouldMaskMobile('profile')}
               onDataReceived={(data) => {

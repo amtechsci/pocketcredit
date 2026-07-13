@@ -16,6 +16,7 @@ const {
 } = require('../services/digitapBankStatementService');
 const { saveUserInfoFromBankAPI } = require('../services/userInfoService');
 const { fetchAndSaveBankStatementReports } = require('../utils/bankStatementReportStorage');
+const { fetchAadhaarLinkedMobile, normalizeIndianMobile } = require('../utils/resolveAadhaarLinkedMobile');
 
 /**
  * Helper function to extract bank details from Digitap report data
@@ -273,29 +274,16 @@ router.post('/initiate-bank-statement', requireAuth, checkHoldStatus, async (req
     const userId = req.userId;
     const { mobile_number: providedMobile, bank_name, destination } = req.body;
 
-    // Get user's mobile number from profile if not provided
-    const users = await executeQuery(
-      'SELECT phone FROM users WHERE id = ?',
-      [userId]
-    );
-
-    if (!users || users.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
-
-    // For manual upload (statementupload), mobile number is optional
-    // For online methods (accountaggregator, netbanking), mobile number is required
-    const mobile_number = providedMobile || users[0].phone;
+    // Use Aadhaar-linked mobile for fetch APIs (not primary phone)
+    const aadhaarMobile = await fetchAadhaarLinkedMobile(executeQuery, userId);
+    const mobile_number = normalizeIndianMobile(providedMobile) || aadhaarMobile;
 
     if (destination !== 'statementupload') {
       // Online methods require mobile number
       if (!mobile_number) {
         return res.status(400).json({
           success: false,
-          message: 'Mobile number is required for online verification'
+          message: 'Aadhaar-linked mobile number is required for online verification. Complete DigiLocker KYC first.'
         });
       }
 

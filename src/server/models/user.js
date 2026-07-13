@@ -249,6 +249,7 @@ const getProfileSummary = async (user) => {
   return {
     id: user.id,
     phone: user.phone,
+    aadhar_linked_mobile: user.aadhar_linked_mobile || null,
     email: user.email,
     personal_email: user.personal_email || null,
     personal_email_verified: user.personal_email_verified || false,

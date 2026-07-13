@@ -16,6 +16,7 @@ const {
   assertNotAwaitingDocsReview
 } = require('../services/employmentVerificationService');
 const { isUANSuccess } = require('../constants/employmentVerificationCodes');
+const { resolveAadhaarLinkedMobile } = require('../utils/resolveAadhaarLinkedMobile');
 const { isBlockedEmailDomain } = require('../constants/employmentVerificationCodes');
 
 const transporter = nodemailer.createTransport({
@@ -77,8 +78,8 @@ async function getUserMobileAndPan(userId) {
   );
   if (!rows.length) return { mobile: null, pan: null };
   const u = rows[0];
-  const mobile = (u.aadhar_linked_mobile || u.phone || '').replace(/\D/g, '').slice(-10);
-  return { mobile: mobile.length === 10 ? mobile : null, pan: u.pan_number || null };
+  const mobile = resolveAadhaarLinkedMobile(u);
+  return { mobile, pan: u.pan_number || null };
 }
 
 function handleDocsVerifyBlock(res, error) {
@@ -139,7 +140,7 @@ router.post('/check-uan-by-pan', requireAuth, async (req, res) => {
     if (!mobile) {
       return res.status(400).json({
         success: false,
-        message: 'Mobile number not found for UAN lookup'
+        message: 'Aadhaar-linked mobile number not found. Complete DigiLocker KYC first.'
       });
     }
 

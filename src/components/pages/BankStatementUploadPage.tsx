@@ -22,12 +22,26 @@ export const BankStatementUploadPage = () => {
   const [checkingStatus, setCheckingStatus] = useState(true);
   const [uploadStatus, setUploadStatus] = useState<'none' | 'uploaded' | 'under_review' | 'verified' | 'rejected'>('none');
 
-  // Set mobile number from user context on mount
+  // Set mobile number from Aadhaar-linked number on mount
   useEffect(() => {
-    if (user?.phone && !mobileNumber) {
-      setMobileNumber(user.phone);
-    }
-  }, [user]);
+    const loadAadhaarMobile = async () => {
+      if (mobileNumber) return;
+      try {
+        const profile = await apiService.getUserProfile();
+        const aadhaarMobile = profile.data?.user?.aadhar_linked_mobile;
+        if (aadhaarMobile) {
+          setMobileNumber(aadhaarMobile);
+          return;
+        }
+      } catch (error) {
+        console.warn('Could not load Aadhaar-linked mobile:', error);
+      }
+      if (user?.aadhar_linked_mobile) {
+        setMobileNumber(user.aadhar_linked_mobile);
+      }
+    };
+    loadAadhaarMobile();
+  }, [user, mobileNumber]);
 
   // Check if bank statement already uploaded
   useEffect(() => {
