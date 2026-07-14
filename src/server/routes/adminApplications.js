@@ -190,8 +190,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
         art.name as temp_recovery_officer_name,
         af.name as follow_up_user_name,
         aft.name as temp_follow_up_user_name,
-        ev.ev_status,
-        ev.ev_method,
+        ev.status as ev_status,
+        ev.method as ev_method,
         ev.uan_api_result_code,
         ev.uan_number as ev_uan_number
       FROM loan_applications la
