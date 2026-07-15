@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type ReactNode } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -110,6 +110,121 @@ const DESIGNATIONS = [
   'Senior Manager',
   'CEO/ director / Vice President / Authorised signatory / CBO / CFO / Company Secretary (CS)'
 ];
+
+/** Searchable single-select for long option lists (education / industry / department / designation). */
+function FilterableSelect({
+  id,
+  label,
+  icon,
+  value,
+  options,
+  placeholder,
+  disabled,
+  onChange
+}: {
+  id: string;
+  label: ReactNode;
+  icon?: ReactNode;
+  value: string;
+  options: string[];
+  placeholder: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState('');
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const filtered = options.filter((opt) =>
+    opt.toLowerCase().includes(filter.trim().toLowerCase())
+  );
+
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setFilter('');
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      setTimeout(() => inputRef.current?.focus(), 0);
+    }
+  }, [open]);
+
+  return (
+    <div className="space-y-2" ref={wrapRef}>
+      <Label htmlFor={id} className="text-base flex items-center gap-2">
+        {icon}
+        {label}
+      </Label>
+      <div className="relative">
+        <button
+          type="button"
+          id={id}
+          disabled={disabled}
+          onClick={() => {
+            if (disabled) return;
+            setOpen((o) => !o);
+            setFilter('');
+          }}
+          className="w-full h-11 px-3 py-2 border border-gray-300 rounded-md bg-white text-left flex items-center justify-between focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+        >
+          <span className={value ? 'text-gray-900 truncate' : 'text-gray-400 truncate'}>
+            {value || placeholder}
+          </span>
+          <Search className="w-4 h-4 text-gray-400 shrink-0 ml-2" />
+        </button>
+        {open && (
+          <div className="absolute z-30 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg overflow-hidden">
+            <div className="p-2 border-b border-gray-100">
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  placeholder={`Filter ${typeof label === 'string' ? label.toLowerCase() : 'options'}...`}
+                  className="w-full h-9 pl-8 pr-3 text-sm border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+            <ul className="max-h-56 overflow-y-auto py-1">
+              {filtered.length === 0 ? (
+                <li className="px-3 py-2 text-sm text-gray-500">No matches</li>
+              ) : (
+                filtered.map((opt) => (
+                  <li key={opt}>
+                    <button
+                      type="button"
+                      className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-center justify-between ${
+                        value === opt ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-800'
+                      }`}
+                      onClick={() => {
+                        onChange(opt);
+                        setOpen(false);
+                        setFilter('');
+                      }}
+                    >
+                      <span className="truncate">{opt}</span>
+                      {value === opt && <Check className="w-4 h-4 shrink-0 ml-2" />}
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export const EmploymentDetailsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -589,31 +704,15 @@ export const EmploymentDetailsPage: React.FC = () => {
               </div>
 
               {/* Education */}
-              <div className="space-y-2">
-                <Label className="text-base">
-                  Education <span className="text-red-500">*</span>
-                </Label>
-                <div className="space-y-2">
-                  {EDUCATION_OPTIONS.map((edu) => (
-                    <div key={edu} className="flex items-center gap-3 p-3 border border-gray-200 rounded-md hover:bg-gray-50">
-                      <input
-                        type="radio"
-                        id={`education_${edu}`}
-                        name="education"
-                        value={edu}
-                        checked={formData.education === edu}
-                        onChange={(e) => handleInputChange('education', e.target.value)}
-                        className="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500"
-                        disabled={loading}
-                        required
-                      />
-                      <label htmlFor={`education_${edu}`} className="text-sm text-gray-700 cursor-pointer flex-1">
-                        {edu}
-                      </label>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <FilterableSelect
+                id="education"
+                label={<>Education <span className="text-red-500">*</span></>}
+                value={formData.education}
+                options={EDUCATION_OPTIONS}
+                placeholder="Filter & select education"
+                disabled={loading}
+                onChange={(v) => handleInputChange('education', v)}
+              />
 
               {/* Salary Date */}
               <div className="space-y-2">
@@ -642,23 +741,15 @@ export const EmploymentDetailsPage: React.FC = () => {
 
               {/* Industry */}
               <div className="space-y-2">
-                <Label htmlFor="industry" className="text-base">
-                  Industry <span className="text-red-500">*</span>
-                </Label>
-                <select
+                <FilterableSelect
                   id="industry"
+                  label={<>Industry <span className="text-red-500">*</span></>}
                   value={formData.industry}
-                  onChange={(e) => handleInputChange('industry', e.target.value)}
-                  className="w-full h-11 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  options={INDUSTRIES}
+                  placeholder="Filter & select industry"
                   disabled={loading}
-                >
-                  <option value="">Select industry</option>
-                  {INDUSTRIES.map((industry) => (
-                    <option key={industry} value={industry}>
-                      {industry}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(v) => handleInputChange('industry', v)}
+                />
                 {formData.industry === 'Others' && (
                   <Input
                     id="industry_other"
@@ -675,24 +766,16 @@ export const EmploymentDetailsPage: React.FC = () => {
 
               {/* Department */}
               <div className="space-y-2">
-                <Label htmlFor="department" className="text-base flex items-center gap-2">
-                  <Users className="w-4 h-4" />
-                  Department <span className="text-red-500">*</span>
-                </Label>
-                <select
+                <FilterableSelect
                   id="department"
+                  icon={<Users className="w-4 h-4" />}
+                  label={<>Department <span className="text-red-500">*</span></>}
                   value={formData.department}
-                  onChange={(e) => handleInputChange('department', e.target.value)}
-                  className="w-full h-11 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  options={DEPARTMENTS}
+                  placeholder="Filter & select department"
                   disabled={loading}
-                >
-                  <option value="">Select department</option>
-                  {DEPARTMENTS.map((dept) => (
-                    <option key={dept} value={dept}>
-                      {dept}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(v) => handleInputChange('department', v)}
+                />
                 {formData.department === 'Others' && (
                   <Input
                     id="department_other"
@@ -708,26 +791,16 @@ export const EmploymentDetailsPage: React.FC = () => {
               </div>
 
               {/* Designation */}
-              <div className="space-y-2">
-                <Label htmlFor="designation" className="text-base flex items-center gap-2">
-                  <Award className="w-4 h-4" />
-                  Designation <span className="text-red-500">*</span>
-                </Label>
-                <select
-                  id="designation"
-                  value={formData.designation}
-                  onChange={(e) => handleInputChange('designation', e.target.value)}
-                  className="w-full h-11 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  disabled={loading}
-                >
-                  <option value="">Select designation</option>
-                  {DESIGNATIONS.map((desig) => (
-                    <option key={desig} value={desig}>
-                      {desig}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <FilterableSelect
+                id="designation"
+                icon={<Award className="w-4 h-4" />}
+                label={<>Designation <span className="text-red-500">*</span></>}
+                value={formData.designation}
+                options={DESIGNATIONS}
+                placeholder="Filter & select designation"
+                disabled={loading}
+                onChange={(v) => handleInputChange('designation', v)}
+              />
 
               {/* Submit Button */}
               <div className="pt-4">

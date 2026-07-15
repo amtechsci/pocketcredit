@@ -17,22 +17,40 @@ interface UANEmploymentInfoProps {
 }
 
 function extractUANData(data: any) {
-  const result = data?.result || data;
-  const uanArray = result?.uan || [];
-  const matchingUan = result?.summary?.matching_uan || (uanArray.length > 0 ? uanArray[0] : null);
-  const uanDetails = matchingUan ? result?.uan_details?.[matchingUan] : null;
-  const basicDetails = uanDetails?.basic_details || {};
-  const employmentDetails = uanDetails?.employment_details || {};
+  const result = data?.result || data?.data?.result || data;
+  const uanArray = Array.isArray(result?.uan)
+    ? result.uan
+    : result?.uan
+      ? [result.uan]
+      : [];
+  const matchingUan =
+    result?.summary?.matching_uan ||
+    (uanArray.length > 0 ? uanArray[0] : null) ||
+    result?.uan_number ||
+    null;
+  const uanDetailsMap = result?.uan_details || {};
+  const uanDetails = matchingUan ? uanDetailsMap[matchingUan] : Object.values(uanDetailsMap)[0];
+  const basicDetails = uanDetails?.basic_details || result?.employee_details || result?.basic_details || {};
+  const employmentDetails =
+    uanDetails?.employment_details ||
+    (Array.isArray(result?.est_details) ? result.est_details[0] : result?.est_details) ||
+    {};
   const summary = result?.summary || {};
-  const recentEmployerData = summary?.recent_employer_data || {};
+  const recentEmployerData = summary?.recent_employer_data || employmentDetails || {};
+  const allEmployers = Array.isArray(result?.est_details)
+    ? result.est_details
+    : Array.isArray(uanDetails?.employment_details)
+      ? uanDetails.employment_details
+      : [];
 
   return {
     matchingUan,
-    uanCount: summary?.uan_count,
+    uanList: uanArray,
+    uanCount: summary?.uan_count ?? uanArray.length,
     isEmployed: summary?.is_employed,
     dateOfExitMarked: summary?.date_of_exit_marked,
-    name: basicDetails?.name,
-    dateOfBirth: basicDetails?.date_of_birth,
+    name: basicDetails?.name || basicDetails?.full_name,
+    dateOfBirth: basicDetails?.date_of_birth || basicDetails?.dob,
     mobile: data?.mobile || basicDetails?.mobile,
     gender: basicDetails?.gender,
     aadhaarVerificationStatus: basicDetails?.aadhaar_verification_status,
@@ -41,6 +59,8 @@ function extractUANData(data: any) {
     dateOfJoining: recentEmployerData?.date_of_joining || employmentDetails?.date_of_joining,
     dateOfExit: recentEmployerData?.date_of_exit || employmentDetails?.date_of_exit,
     memberId: recentEmployerData?.member_id || employmentDetails?.member_id,
+    allEmployers,
+    raw: data
   };
 }
 
@@ -295,6 +315,11 @@ export function UANEmploymentInfo({
                 </div>
                 <div className="text-xs text-gray-600 mb-1">Universal Account Number (UAN)</div>
                 <div className="text-2xl font-bold text-green-700 font-mono">{uanData.matchingUan}</div>
+                {uanData.uanList?.length > 1 && (
+                  <div className="mt-2 text-xs text-gray-600">
+                    All UANs: {uanData.uanList.join(', ')}
+                  </div>
+                )}
               </div>
             )}
 
@@ -313,6 +338,12 @@ export function UANEmploymentInfo({
                   </div>
                 </div>
               )}
+              {uanData.dateOfExitMarked !== undefined && (
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <div className="text-xs text-gray-500">Exit Marked</div>
+                  <div className="font-semibold">{uanData.dateOfExitMarked ? 'Yes' : 'No'}</div>
+                </div>
+              )}
             </div>
 
             <div className="bg-gray-50 rounded-lg p-4 space-y-3">
@@ -327,6 +358,12 @@ export function UANEmploymentInfo({
                     <span className="font-medium">{uanData.name}</span>
                   </div>
                 )}
+                {uanData.dateOfBirth && (
+                  <div>
+                    <span className="text-gray-500">DOB:</span>{' '}
+                    <span className="font-medium">{uanData.dateOfBirth}</span>
+                  </div>
+                )}
                 {uanData.mobile && (
                   <div>
                     <span className="text-gray-500">Mobile:</span>{' '}
@@ -335,10 +372,24 @@ export function UANEmploymentInfo({
                     </span>
                   </div>
                 )}
+                {uanData.gender && (
+                  <div>
+                    <span className="text-gray-500">Gender:</span>{' '}
+                    <span className="font-medium">{uanData.gender}</span>
+                  </div>
+                )}
+                {uanData.aadhaarVerificationStatus !== undefined && uanData.aadhaarVerificationStatus !== null && (
+                  <div>
+                    <span className="text-gray-500">Aadhaar Verification:</span>{' '}
+                    <span className="font-medium">
+                      {uanData.aadhaarVerificationStatus === 1 ? 'Verified' : String(uanData.aadhaarVerificationStatus)}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
-            {(uanData.establishmentName || uanData.establishmentId) && (
+            {(uanData.establishmentName || uanData.establishmentId || uanData.memberId) && (
               <div className="bg-blue-50 rounded-lg p-4 space-y-3">
                 <h4 className="font-semibold text-sm flex items-center gap-2">
                   <Briefcase className="w-4 h-4" />
@@ -351,16 +402,68 @@ export function UANEmploymentInfo({
                       <span className="font-medium">{uanData.establishmentName}</span>
                     </div>
                   )}
-                  {uanData.dateOfJoining && (
-                    <div className="flex items-center gap-1">
-                      <Calendar className="w-3 h-3 text-gray-400" />
-                      <span className="text-gray-500">Joined:</span>{' '}
-                      <span className="font-medium">{uanData.dateOfJoining}</span>
+                  {uanData.establishmentId && (
+                    <div>
+                      <span className="text-gray-500">Establishment ID:</span>{' '}
+                      <span className="font-medium font-mono text-xs">{uanData.establishmentId}</span>
                     </div>
                   )}
+                  {uanData.memberId && (
+                    <div>
+                      <span className="text-gray-500">Member ID:</span>{' '}
+                      <span className="font-medium font-mono text-xs">{uanData.memberId}</span>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    {uanData.dateOfJoining && (
+                      <div className="flex items-center gap-1">
+                        <Calendar className="w-3 h-3 text-gray-400" />
+                        <span className="text-gray-500">Joined:</span>{' '}
+                        <span className="font-medium">{uanData.dateOfJoining}</span>
+                      </div>
+                    )}
+                    {uanData.dateOfExit && (
+                      <div className="flex items-center gap-1">
+                        <Calendar className="w-3 h-3 text-gray-400" />
+                        <span className="text-gray-500">Exit:</span>{' '}
+                        <span className="font-medium">{uanData.dateOfExit}</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
+
+            {uanData.allEmployers?.length > 1 && (
+              <div className="bg-white border border-gray-200 rounded-lg p-4 space-y-2">
+                <h4 className="font-semibold text-sm">All Employers ({uanData.allEmployers.length})</h4>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {uanData.allEmployers.map((emp: any, idx: number) => (
+                    <div key={idx} className="text-xs border-b border-gray-100 pb-2">
+                      <div className="font-medium">{emp.establishment_name || emp.name || `Employer ${idx + 1}`}</div>
+                      {(emp.date_of_joining || emp.date_of_exit) && (
+                        <div className="text-gray-500 mt-1">
+                          {emp.date_of_joining || '—'} → {emp.date_of_exit || 'Present'}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {isAdminMode && (
+              <details className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                <summary className="cursor-pointer text-sm font-medium text-gray-700">View full API response</summary>
+                <pre className="mt-2 text-xs overflow-auto max-h-80 whitespace-pre-wrap break-all">
+                  {JSON.stringify(responseData, null, 2)}
+                </pre>
+              </details>
+            )}
+
+            <Button onClick={handleReset} variant="outline" className="w-full">
+              Fetch Again
+            </Button>
           </div>
         )}
 

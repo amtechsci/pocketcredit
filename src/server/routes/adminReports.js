@@ -1770,28 +1770,27 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                                 emiPaidLate = txDateStr > emiDueDateStr;
                             }
                         }
-                        dpdInterest = parseFloat(
-                            emiEntry.dpd_interest_on_total_principal ||
-                            emiEntry.dpd_interest || 0
-                        ) || 0;
                     }
 
-                    // Compute DPD via the same formula as loanCalculations.js when not stored.
-                    if (dpdInterest === 0 && emiPaidLate && emiDueDateStr && row.transaction_date) {
+                    // Always recompute on overdue EMI principal (ignore stale stored full-principal values).
+                    if (emiPaidLate && emiDueDateStr && row.transaction_date) {
                         const txDateStr2 = parseDateToString(row.transaction_date);
                         if (txDateStr2) {
                             const rawDays = calculateDaysBetween(emiDueDateStr, txDateStr2);
                             const dpdDays = Math.max(1, rawDays - 1);
-                            const loanAmt = parseFloat(row.principal_amount || 0);
+                            const emiPrincipal =
+                                parseFloat(emiEntry?.principal) ||
+                                emiParts.principal ||
+                                0;
                             const dailyRate = clampDailyInterestRateForBsReport(row.interest_percent_per_day);
-                            dpdInterest = toDecimal2(loanAmt * dailyRate * dpdDays);
+                            dpdInterest = toDecimal2(Math.max(0, emiPrincipal) * dailyRate * dpdDays);
                         }
                     }
 
                     // Waterfall allocation of the ACTUAL repayment amount, in priority order:
                     //   1. base EMI    = instalment_amount / schedule components (principal+interest+fees)
                     //   2. PENAL INTEREST (DPD) — capped at whatever remains after base
-                    //   3. PENALTY + GST on PENALTY — whatever remains after base + DPD
+                    //   3. Late-fee PENALTY — GST-inclusive % rates; do NOT add separate GST on top
                     if (emiPaidLate) {
                         const { base: baseEmi, usedInstalment } = resolveBsEmiBaseAmount(
                             emiEntry, row, emiNum, bd, repayment_amt
@@ -1817,8 +1816,9 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                         remaining = toDecimal2(remaining - dpdApplied);
 
                         if (remaining > 0.02) {
-                            penalty = toDecimal2(remaining / GST_FACTOR);
-                            gst_on_penalty = toDecimal2(penalty * GST_RATE);
+                            // Late-fee % is GST-inclusive — entire remainder is PENALTY; GST column = 0
+                            penalty = remaining;
+                            gst_on_penalty = 0;
                         }
                     }
                 }

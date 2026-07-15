@@ -1925,13 +1925,25 @@ class AdminApiService {
     }
   }
 
-  async performCreditCheck(userId: number, forceRefetch: boolean = false): Promise<ApiResponse<any>> {
+  async performCreditCheck(
+    userId: number,
+    forceRefetch: boolean = false,
+    overrides?: { mobile_no?: string; pan?: string }
+  ): Promise<ApiResponse<any>> {
     try {
-      const response = await axios.post(`/api/admin/users/${userId}/perform-credit-check`, { force: forceRefetch }, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+      const response = await axios.post(
+        `/api/admin/users/${userId}/perform-credit-check`,
+        {
+          force: forceRefetch,
+          mobile_no: overrides?.mobile_no || undefined,
+          pan: overrides?.pan || undefined
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('adminToken')}`
+          }
         }
-      });
+      );
       return response.data;
     } catch (error) {
       this.handleAuthError(error);

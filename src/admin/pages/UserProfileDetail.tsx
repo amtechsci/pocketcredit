@@ -472,6 +472,10 @@ function UserProfileDetail() {
   const [creditAnalyticsData, setCreditAnalyticsData] = useState<any>(null);
   const [creditAnalyticsLoading, setCreditAnalyticsLoading] = useState(false);
   const [performingCreditCheck, setPerformingCreditCheck] = useState(false);
+  const [showCreditCheckModal, setShowCreditCheckModal] = useState(false);
+  const [creditCheckForce, setCreditCheckForce] = useState(false);
+  const [creditCheckMobile, setCreditCheckMobile] = useState('');
+  const [creditCheckPan, setCreditCheckPan] = useState('');
 
   // EMI Details modal state
   const [showEmiDetailsModal, setShowEmiDetailsModal] = useState(false);
@@ -580,36 +584,51 @@ function UserProfileDetail() {
     }
   };
 
+  // Open credit check modal with editable mobile + PAN (any person fetch)
+  const openCreditCheckModal = (forceRefetch: boolean = false) => {
+    if (!userData?.id) return;
+    setCreditCheckForce(forceRefetch);
+    setCreditCheckMobile(
+      (userData.aadharLinkedMobile || userData.aadhar_linked_mobile || '').replace(/\D/g, '').slice(-10)
+    );
+    setCreditCheckPan((userData.panNumber || userData.pan_number || '').toUpperCase());
+    setShowCreditCheckModal(true);
+  };
+
   // Perform credit check for user
-  const handlePerformCreditCheck = async (forceRefetch: boolean = false) => {
+  const handlePerformCreditCheck = async (forceRefetch: boolean = false, overrides?: { mobile_no?: string; pan?: string }) => {
     if (!userData?.id) return;
 
-    const confirmMessage = forceRefetch
-      ? 'Are you sure you want to refetch credit data? This will call the credit API again and fetch new data from Experian.'
-      : 'Are you sure you want to perform a credit check for this user? This will fetch credit analytics data from Experian.';
+    const mobile = (overrides?.mobile_no || creditCheckMobile || '').replace(/\D/g, '').slice(-10);
+    const pan = (overrides?.pan || creditCheckPan || '').trim().toUpperCase();
 
-    if (!confirm(confirmMessage)) {
+    if (!mobile || !/^[6-9]\d{9}$/.test(mobile)) {
+      toast.error('Enter a valid 10-digit mobile number');
+      return;
+    }
+    if (!pan || !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(pan)) {
+      toast.error('Enter a valid PAN number');
       return;
     }
 
     try {
       setPerformingCreditCheck(true);
+      setShowCreditCheckModal(false);
 
-      // Old credit score will now be saved in database (previous_credit_score field)
-      // No need to store in state anymore - it's permanently saved in DB
-
-      const response = await adminApiService.performCreditCheck(userData.id, forceRefetch);
+      const response = await adminApiService.performCreditCheck(userData.id, forceRefetch, {
+        mobile_no: mobile,
+        pan
+      });
 
       if (response.status === 'success') {
         if (response.data?.already_checked && !forceRefetch) {
-          alert('Credit check already performed for this user. Use "Refetch Credit" button to get new data.');
+          toast.info('Credit check already performed for this user. Use "Refetch Credit" to get new data.');
         } else {
           const message = forceRefetch
             ? `Credit check refetched! New Score: ${response.data?.credit_score || 'N/A'}, Eligible: ${response.data?.is_eligible ? 'Yes' : 'No'}`
             : `Credit check completed! Score: ${response.data?.credit_score || 'N/A'}, Eligible: ${response.data?.is_eligible ? 'Yes' : 'No'}`;
           toast.success(message);
         }
-        // Refresh credit analytics data
         await fetchCreditAnalytics();
       } else {
         toast.error(response.message || 'Failed to perform credit check');
@@ -6521,23 +6540,23 @@ function UserProfileDetail() {
     return diff;
   };
 
-  // Helper function to calculate penalty charges
+  // Helper function to calculate penalty charges (GST-inclusive rates)
   const calculatePenalty = (principal: number, dpd: number) => {
     if (dpd <= 0) return { penalty: 0, gst: 0, total: 0 };
 
     let penaltyPercent = 0;
     if (dpd === 1) {
-      penaltyPercent = 5; // 5% on first day
+      penaltyPercent = 5; // 5% day 1 (GST inclusive)
     } else if (dpd >= 2 && dpd <= 10) {
-      penaltyPercent = 1 * (dpd - 1); // 1% per day from day 2-10
+      penaltyPercent = 5 + 1 * (dpd - 1); // 5% day 1 + 1%/day days 2-10
     } else if (dpd >= 11 && dpd <= 120) {
-      penaltyPercent = 9 + (0.6 * (dpd - 10)); // 9% (days 2-10) + 0.6% per day from day 11-120
+      penaltyPercent = 5 + 9 + 0.6 * (dpd - 10);
     }
-    // Above 120 days, penalty is 0
 
-    const penalty = (principal * penaltyPercent) / 100;
-    const gst = (penalty * 18) / 100;
-    return { penalty, gst, total: penalty + gst };
+    const inclusive = (principal * penaltyPercent) / 100;
+    const penalty = inclusive / 1.18;
+    const gst = inclusive - penalty;
+    return { penalty, gst, total: inclusive };
   };
 
   // Helper function to calculate interest till current date - no timezone conversion
@@ -8048,7 +8067,7 @@ function UserProfileDetail() {
           <h3 className="text-lg font-semibold text-gray-900 mb-2">No Credit Analytics Data</h3>
           <p className="text-gray-600 mb-4">This user has not completed a credit check yet.</p>
           <button
-            onClick={() => handlePerformCreditCheck()}
+            onClick={() => openCreditCheckModal(false)}
             disabled={performingCreditCheck || !userData?.id}
             className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
           >
@@ -8121,7 +8140,7 @@ function UserProfileDetail() {
           </div>
 
           <Button
-            onClick={() => handlePerformCreditCheck(true)}
+            onClick={() => openCreditCheckModal(true)}
             disabled={performingCreditCheck}
             className="bg-red-600 hover:bg-red-700 text-white"
           >
@@ -8474,7 +8493,7 @@ function UserProfileDetail() {
             <div className="flex flex-wrap items-center gap-2">
               {/* Refetch Credit Button */}
               <button
-                onClick={() => handlePerformCreditCheck(true)}
+                onClick={() => openCreditCheckModal(true)}
                 disabled={performingCreditCheck || !userData?.id}
                 className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-green-600 text-white text-xs sm:text-sm rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
                 title="Refetch credit data from Experian API"
@@ -12370,7 +12389,7 @@ function UserProfileDetail() {
                                 </div>
                                 {hasDpdInterest ? (
                                   <div className="text-xs text-amber-800 mt-1">
-                                    DPD interest (on total principal): ₹{dpdInterestOnTotalPrincipal.toFixed(2)}
+                                    Penal interest (0.1%/day on overdue EMI principal): ₹{dpdInterestOnTotalPrincipal.toFixed(2)}
                                   </div>
                                 ) : null}
                                 {hasPenalty ? (
@@ -12443,6 +12462,56 @@ function UserProfileDetail() {
                 <p>No EMI schedule data available</p>
               </div>
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showCreditCheckModal} onOpenChange={setShowCreditCheckModal}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{creditCheckForce ? 'Refetch Credit Check' : 'Perform Credit Check'}</DialogTitle>
+            <DialogDescription>
+              Enter mobile and PAN to fetch Experian credit data. You can use any valid mobile/PAN for this lookup.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <label className="text-sm font-medium text-gray-700">Mobile Number</label>
+              <input
+                type="tel"
+                value={creditCheckMobile}
+                onChange={(e) => setCreditCheckMobile(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                placeholder="10-digit mobile"
+                maxLength={10}
+                className="mt-1 w-full h-10 px-3 border border-gray-300 rounded-md"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-700">PAN Number</label>
+              <input
+                type="text"
+                value={creditCheckPan}
+                onChange={(e) => setCreditCheckPan(e.target.value.toUpperCase().slice(0, 10))}
+                placeholder="ABCDE1234F"
+                maxLength={10}
+                className="mt-1 w-full h-10 px-3 border border-gray-300 rounded-md uppercase"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setShowCreditCheckModal(false)} disabled={performingCreditCheck}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => handlePerformCreditCheck(creditCheckForce, {
+                  mobile_no: creditCheckMobile,
+                  pan: creditCheckPan
+                })}
+                disabled={performingCreditCheck}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                {performingCreditCheck ? 'Fetching...' : creditCheckForce ? 'Refetch Credit' : 'Fetch Credit'}
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

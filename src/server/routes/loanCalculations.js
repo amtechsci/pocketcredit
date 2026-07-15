@@ -829,10 +829,16 @@ async function computeLoanCalculationResponseData(loanId, opts = {}) {
             penaltyBase += tierPenalty;
           }
           
-          const penaltyBaseRounded = toDecimal2(penaltyBase);
-          const gstPercent = lateFeeStructure[0]?.gst_percent || 18;
-          const penaltyGST = toDecimal2(penaltyBaseRounded * (gstPercent / 100));
-          const penaltyTotal = toDecimal2(penaltyBaseRounded + penaltyGST);
+          const penaltyInclusive = toDecimal2(penaltyBase);
+          // Late-fee % rates are GST-inclusive — split for reporting only.
+          const gstPercent = lateFeeStructure[0]?.gst_percent ?? 18;
+          let penaltyBaseRounded = penaltyInclusive;
+          let penaltyGST = 0;
+          if (gstPercent > 0) {
+            penaltyBaseRounded = toDecimal2(penaltyInclusive / (1 + gstPercent / 100));
+            penaltyGST = toDecimal2(penaltyInclusive - penaltyBaseRounded);
+          }
+          const penaltyTotal = penaltyInclusive;
           
           return { penaltyBase: penaltyBaseRounded, penaltyGST, penaltyTotal };
         };
@@ -1064,7 +1070,7 @@ async function computeLoanCalculationResponseData(loanId, opts = {}) {
             penT = pc.penaltyTotal;
           }
           const dpdInt = (firstOverdueUnpaidIdx === idx)
-            ? toDecimal2(daysOverdue * interestRatePerDay * principal)
+            ? toDecimal2(daysOverdue * interestRatePerDay * pEmi)
             : 0;
           return {
             ...inst,
@@ -1117,26 +1123,37 @@ async function computeLoanCalculationResponseData(loanId, opts = {}) {
                     ) || storedEmiSchedule[idx])
                   : null) || {};
 
+                const baseInstalment = toDecimal2(
+                  (parseFloat(instalment.principal) || 0) +
+                  (parseFloat(instalment.interest) || 0) +
+                  (parseFloat(instalment.post_service_fee) || 0) +
+                  (parseFloat(instalment.gst_on_post_service_fee) || 0)
+                );
+
                 const entry = {
-                  // Spread existing stored fields first so nothing is lost
                   ...storedEmi,
-                  // Always overwrite structural fields with freshly-calculated values
                   emi_number: instalment.emi_number,
                   instalment_no: instalment.instalment_no,
                   due_date: instalment.due_date,
                   status: instalment.status || storedEmi.status || 'pending',
+                  principal: instalment.principal,
+                  interest: instalment.interest,
+                  post_service_fee: instalment.post_service_fee,
+                  gst_on_post_service_fee: instalment.gst_on_post_service_fee,
+                  // Fresh GST-inclusive late fee + penal interest (overwrite stale stored values)
+                  penalty_base: instalment.penalty_base || 0,
+                  penalty_gst: instalment.penalty_gst || 0,
+                  penalty_total: instalment.penalty_total || 0,
+                  dpd_interest_on_total_principal: instalment.dpd_interest_on_total_principal || 0,
                   // Dynamic penalty-inclusive amount used for display / repayment page
                   emi_amount: instalment.instalment_amount,
+                  // Keep original base instalment for eNACH (do not grow with DPD)
+                  instalment_amount:
+                    storedEmi.instalment_amount != null
+                      ? storedEmi.instalment_amount
+                      : baseInstalment
                 };
 
-                // Preserve the original base instalment_amount from the stored schedule so that
-                // eNACH auto-debit always charges the correct remaining amount rather than the
-                // ever-growing penalty-inclusive emi_amount.
-                if (storedEmi.instalment_amount != null) {
-                  entry.instalment_amount = storedEmi.instalment_amount;
-                }
-
-                // Preserve paid_date from instalment if it was merged in
                 if (instalment.paid_date) {
                   entry.paid_date = instalment.paid_date;
                 }
@@ -1145,6 +1162,17 @@ async function computeLoanCalculationResponseData(loanId, opts = {}) {
               });
               updateFields.push('emi_schedule = ?');
               updateValues.push(JSON.stringify(updatedEmiSchedule));
+
+              // Keep processed_penalty in sync with GST-inclusive sum of overdue EMI penalties
+              const refreshedPenalty = toDecimal2(
+                schedule.reduce((sum, emi) => {
+                  const st = String(emi.status || 'pending').toLowerCase();
+                  if (st === 'paid' || st === 'completed') return sum;
+                  return sum + (parseFloat(emi.penalty_total) || 0);
+                }, 0)
+              );
+              updateFields.push('processed_penalty = ?');
+              updateValues.push(refreshedPenalty);
             }
             
             // Always update fees_breakdown, disbursal_amount, and total_repayable
@@ -1303,47 +1331,51 @@ async function computeLoanCalculationResponseData(loanId, opts = {}) {
     let penaltyTotal = 0;
     let daysPastDue = 0;
     
-    // Check if loan is in account_manager status and has processed_penalty from cron job
-    const isAccountManager = loan.status === 'account_manager' && loan.processed_at;
-    const hasStoredPenalty = loan.processed_penalty !== null && loan.processed_penalty !== undefined && parseFloat(loan.processed_penalty) > 0;
-    
-    if (isAccountManager && hasStoredPenalty) {
-      // Use stored penalty from database (calculated by cron job)
-      // For stored penalty, we need to estimate base and GST (18% GST is standard)
+    // Multi-EMI: always use freshly recalculated per-EMI schedule (GST-inclusive late fees +
+    // penal interest on overdue EMI principal). Do NOT trust stale processed_penalty that may
+    // still contain the old "add 18% GST on top" formula (e.g. 3574.26 vs correct 3532.14).
+    const isMultiEmiSchedule =
+      calculation.repayment?.schedule && calculation.repayment.schedule.length > 1;
+    const isAccountManagerSingle =
+      loan.status === 'account_manager' && loan.processed_at && !isMultiEmiSchedule;
+    const hasStoredPenalty =
+      loan.processed_penalty !== null &&
+      loan.processed_penalty !== undefined &&
+      parseFloat(loan.processed_penalty) > 0;
+
+    if (isAccountManagerSingle && hasStoredPenalty) {
+      // Single-payment account_manager: stored cron penalty is GST-inclusive total.
       penaltyTotal = parseFloat(loan.processed_penalty) || 0;
-      // Estimate: penaltyTotal = penaltyBase * 1.18, so penaltyBase = penaltyTotal / 1.18
       penaltyBase = toDecimal2(penaltyTotal / 1.18);
       penaltyGST = toDecimal2(penaltyTotal - penaltyBase);
-      
-      // Calculate days past due for display
+
       let dueDate = null;
       if (loan.processed_due_date) {
-        dueDate = typeof loan.processed_due_date === 'string' 
-          ? loan.processed_due_date.split('T')[0] 
+        dueDate = typeof loan.processed_due_date === 'string'
+          ? loan.processed_due_date.split('T')[0]
           : formatDateToString(loan.processed_due_date);
       } else if (calculation.interest?.repayment_date) {
         dueDate = typeof calculation.interest.repayment_date === 'string'
           ? calculation.interest.repayment_date.split('T')[0]
           : formatDateToString(calculation.interest.repayment_date);
       }
-      
+
       if (dueDate) {
         const todayStr = recalcAsOfDate || getTodayString();
         if (dueDate < todayStr) {
-          daysPastDue = calculateDaysBetween(dueDate, todayStr) - 1; // Exclude today
+          daysPastDue = calculateDaysBetween(dueDate, todayStr) - 1;
           daysPastDue = Math.max(1, daysPastDue);
         }
       }
-      
+
       console.log(`✅ [Loan Calculations] Using stored processed_penalty: ₹${penaltyTotal} for loan #${loanId}`);
     } else {
-      // Calculate penalty dynamically (fallback for non-account_manager loans or if stored penalty not available)
-      // Get late fee structure for penalty calculation
+      // Calculate penalty dynamically (multi-EMI + non-account_manager + missing stored penalty)
       let lateFeeStructure = null;
       try {
         if (loan.late_fee_structure) {
-          lateFeeStructure = typeof loan.late_fee_structure === 'string' 
-            ? JSON.parse(loan.late_fee_structure) 
+          lateFeeStructure = typeof loan.late_fee_structure === 'string'
+            ? JSON.parse(loan.late_fee_structure)
             : loan.late_fee_structure;
         } else if (planSnapshot && planSnapshot.late_fee_structure) {
           lateFeeStructure = typeof planSnapshot.late_fee_structure === 'string'
@@ -1353,22 +1385,19 @@ async function computeLoanCalculationResponseData(loanId, opts = {}) {
       } catch (e) {
         console.error('⚠️ [Loan Calculations] Error parsing late_fee_structure for penalty:', e);
       }
-      
-      // Calculate penalty based on loan type
-      if (calculation.repayment?.schedule && calculation.repayment.schedule.length > 1) {
-        // Multi-EMI: Sum penalty from overdue EMIs in schedule
+
+      if (isMultiEmiSchedule) {
         for (const emi of calculation.repayment.schedule) {
           if (emi.status !== 'paid' && emi.penalty_total && parseFloat(emi.penalty_total) > 0) {
             penaltyBase += parseFloat(emi.penalty_base || 0);
             penaltyGST += parseFloat(emi.penalty_gst || 0);
             penaltyTotal += parseFloat(emi.penalty_total || 0);
-            
-            // Calculate DPD for the first overdue EMI
+
             if (daysPastDue === 0 && emi.due_date) {
               const todayStr = recalcAsOfDate || getTodayString();
               const emiDateStr = typeof emi.due_date === 'string' ? emi.due_date.split('T')[0] : formatDateToString(emi.due_date);
               if (emiDateStr < todayStr) {
-                daysPastDue = calculateDaysBetween(emiDateStr, todayStr) - 1; // Exclude today
+                daysPastDue = calculateDaysBetween(emiDateStr, todayStr) - 1;
                 daysPastDue = Math.max(0, daysPastDue);
               }
             }
@@ -1437,10 +1466,11 @@ async function computeLoanCalculationResponseData(loanId, opts = {}) {
                 }
               }
               
-              penaltyBase = toDecimal2(penaltyBase);
-              const gstPercent = lateFeeStructure[0]?.gst_percent || 18;
-              penaltyGST = toDecimal2(penaltyBase * (gstPercent / 100));
-              penaltyTotal = toDecimal2(penaltyBase + penaltyGST);
+              const inclusive = toDecimal2(penaltyBase);
+              const gstPercent = lateFeeStructure[0]?.gst_percent ?? 18;
+              penaltyBase = gstPercent > 0 ? toDecimal2(inclusive / (1 + gstPercent / 100)) : inclusive;
+              penaltyGST = toDecimal2(inclusive - penaltyBase);
+              penaltyTotal = inclusive;
             } else {
               // Fallback: Use default penalty structure (5% day 1, 1% days 2-10, 0.6% days 11-120)
               let penaltyPercent = 0;
@@ -1451,9 +1481,11 @@ async function computeLoanCalculationResponseData(loanId, opts = {}) {
               } else if (daysPastDue >= 11 && daysPastDue <= 120) {
                 penaltyPercent = 5 + 9 + (0.6 * (daysPastDue - 10));
               }
-              penaltyBase = toDecimal2(principal * penaltyPercent / 100);
-              penaltyGST = toDecimal2(penaltyBase * 0.18);
-              penaltyTotal = toDecimal2(penaltyBase + penaltyGST);
+              const inclusive = toDecimal2(principal * penaltyPercent / 100);
+              // Rates are GST-inclusive — split for reporting only
+              penaltyBase = toDecimal2(inclusive / 1.18);
+              penaltyGST = toDecimal2(inclusive - penaltyBase);
+              penaltyTotal = inclusive;
             }
           }
         }

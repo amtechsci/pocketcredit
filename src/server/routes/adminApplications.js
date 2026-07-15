@@ -267,6 +267,18 @@ router.get('/', authenticateAdmin, async (req, res) => {
     if (effectiveStatus && effectiveStatus !== 'all') {
       if (effectiveStatus === 'submitted') {
         whereConditions.push(`(la.status = 'submitted' OR (la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 0))`);
+        // Docs under employment review belong in Docs Verify tab, not Submitted
+        whereConditions.push(`NOT EXISTS (
+          SELECT 1 FROM employment_verification_records evr
+          WHERE evr.user_id = la.user_id
+            AND (evr.loan_application_id = la.id OR evr.loan_application_id IS NULL)
+            AND evr.status = 'docs_verify'
+            AND evr.id = (
+              SELECT MAX(evr2.id) FROM employment_verification_records evr2
+              WHERE evr2.user_id = la.user_id
+                AND (evr2.loan_application_id = la.id OR evr2.loan_application_id IS NULL)
+            )
+        )`);
       } else if (effectiveStatus === 'under_review') {
         whereConditions.push(`(la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 1)`);
       } else {
@@ -2132,6 +2144,17 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
                  AND (
                    la.status = 'submitted'
                    OR (la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 0)
+                 )
+                 AND NOT EXISTS (
+                   SELECT 1 FROM employment_verification_records evr
+                   WHERE evr.user_id = la.user_id
+                     AND (evr.loan_application_id = la.id OR evr.loan_application_id IS NULL)
+                     AND evr.status = 'docs_verify'
+                     AND evr.id = (
+                       SELECT MAX(evr2.id) FROM employment_verification_records evr2
+                       WHERE evr2.user_id = la.user_id
+                         AND (evr2.loan_application_id = la.id OR evr2.loan_application_id IS NULL)
+                     )
                  )`,
                 [adminId, adminId]
               );
@@ -2159,6 +2182,17 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
                  AND (
                    la.status = 'submitted'
                    OR (la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 0)
+                 )
+                 AND NOT EXISTS (
+                   SELECT 1 FROM employment_verification_records evr
+                   WHERE evr.user_id = la.user_id
+                     AND (evr.loan_application_id = la.id OR evr.loan_application_id IS NULL)
+                     AND evr.status = 'docs_verify'
+                     AND evr.id = (
+                       SELECT MAX(evr2.id) FROM employment_verification_records evr2
+                       WHERE evr2.user_id = la.user_id
+                         AND (evr2.loan_application_id = la.id OR evr2.loan_application_id IS NULL)
+                     )
                  )`,
                 [adminId, adminId]
               );
@@ -2235,6 +2269,17 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
           AND (
             la.status = 'submitted'
             OR (la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 0)
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM employment_verification_records evr
+            WHERE evr.user_id = la.user_id
+              AND (evr.loan_application_id = la.id OR evr.loan_application_id IS NULL)
+              AND evr.status = 'docs_verify'
+              AND evr.id = (
+                SELECT MAX(evr2.id) FROM employment_verification_records evr2
+                WHERE evr2.user_id = la.user_id
+                  AND (evr2.loan_application_id = la.id OR evr2.loan_application_id IS NULL)
+              )
           )
         `);
         const underReviewQueueRows = await executeQuery(`
@@ -2384,7 +2429,18 @@ router.get('/export/sales-tracker-minimal', authenticateAdmin, async (req, res) 
     } else {
       let statusWhere = '';
       if (segment === 'submitted') {
-        statusWhere = `(la.status = 'submitted' OR (la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 0))`;
+        statusWhere = `(la.status = 'submitted' OR (la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 0))
+          AND NOT EXISTS (
+            SELECT 1 FROM employment_verification_records evr
+            WHERE evr.user_id = la.user_id
+              AND (evr.loan_application_id = la.id OR evr.loan_application_id IS NULL)
+              AND evr.status = 'docs_verify'
+              AND evr.id = (
+                SELECT MAX(evr2.id) FROM employment_verification_records evr2
+                WHERE evr2.user_id = la.user_id
+                  AND (evr2.loan_application_id = la.id OR evr2.loan_application_id IS NULL)
+              )
+          )`;
       } else if (segment === 'under_review') {
         statusWhere = `(la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 1)`;
       } else {
@@ -2593,6 +2649,17 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
     if (effectiveStatus && effectiveStatus !== 'all') {
       if (effectiveStatus === 'submitted') {
         whereConditions.push(`(la.status = 'submitted' OR (la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 0))`);
+        whereConditions.push(`NOT EXISTS (
+          SELECT 1 FROM employment_verification_records evr
+          WHERE evr.user_id = la.user_id
+            AND (evr.loan_application_id = la.id OR evr.loan_application_id IS NULL)
+            AND evr.status = 'docs_verify'
+            AND evr.id = (
+              SELECT MAX(evr2.id) FROM employment_verification_records evr2
+              WHERE evr2.user_id = la.user_id
+                AND (evr2.loan_application_id = la.id OR evr2.loan_application_id IS NULL)
+            )
+        )`);
       } else if (effectiveStatus === 'under_review') {
         whereConditions.push(`(la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 1)`);
       } else {

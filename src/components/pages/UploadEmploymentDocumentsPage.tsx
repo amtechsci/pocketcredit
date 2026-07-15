@@ -42,15 +42,15 @@ export const UploadEmploymentDocumentsPage: React.FC = () => {
 
       const response = await apiService.uploadEmploymentDocuments(formData);
       if (response.success) {
-        toast.success(response.message || 'Documents submitted successfully');
-
         if (payslipOnly || response.verified) {
+          toast.success(response.message || 'Payslip uploaded successfully');
           const appId = applicationId ? parseInt(applicationId, 10) : null;
           const progress = await getOnboardingProgress(appId, true);
           navigate(getStepRoute(progress.currentStep, appId, progress.prerequisites), { replace: true });
           return;
         }
 
+        // Full docs upload → dedicated pending page (not toast/alert)
         navigate(
           `/loan-application/employment-docs-pending${applicationId ? `?applicationId=${applicationId}` : ''}`,
           { replace: true }

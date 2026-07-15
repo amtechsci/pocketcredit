@@ -1487,7 +1487,7 @@ router.get('/user/:loanId', requireAuth, async (req, res) => {
               penT = pc.penaltyTotal;
             }
             const dpdInt = (firstOverdueUnpaidIdxKfs === idx)
-              ? toDecimal2(daysOverdue * interestRatePerDay * principal)
+              ? toDecimal2(daysOverdue * interestRatePerDay * pEmi)
               : 0;
             return {
               ...inst,

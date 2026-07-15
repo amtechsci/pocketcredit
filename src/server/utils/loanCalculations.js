@@ -1225,10 +1225,17 @@ function calculatePenaltyFromLateFeeStructure(principalForPenalty, daysOverdue, 
     }
   }
 
-  const penaltyBaseRounded = toDecimal2(penaltyBase);
-  const gstPercent = lateFeeStructure[0]?.gst_percent || 18;
-  const penaltyGST = toDecimal2(penaltyBaseRounded * (gstPercent / 100));
-  const penaltyTotal = toDecimal2(penaltyBaseRounded + penaltyGST);
+  const penaltyInclusive = toDecimal2(penaltyBase);
+  // Product rule: late-fee % rates are GST-inclusive (5% day 1, 1%/day days 2–10).
+  // Split for reporting only — do not add GST on top of the rate.
+  const gstPercent = lateFeeStructure[0]?.gst_percent ?? 18;
+  let penaltyBaseRounded = penaltyInclusive;
+  let penaltyGST = 0;
+  if (gstPercent > 0) {
+    penaltyBaseRounded = toDecimal2(penaltyInclusive / (1 + gstPercent / 100));
+    penaltyGST = toDecimal2(penaltyInclusive - penaltyBaseRounded);
+  }
+  const penaltyTotal = penaltyInclusive;
 
   return { penaltyBase: penaltyBaseRounded, penaltyGST, penaltyTotal };
 }

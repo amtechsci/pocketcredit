@@ -705,17 +705,41 @@ router.get('/uan/admin/stored/:userId', authenticateAdmin, async (req, res) => {
           uanData = JSON.parse(uanData);
         } catch (e) {
           console.error('Error parsing UAN data:', e);
-          return res.json({
-            success: false,
-            message: 'No UAN data found'
-          });
+          uanData = null;
         }
       }
 
-      return res.json({
-        success: true,
-        data: uanData
-      });
+      if (uanData) {
+        return res.json({
+          success: true,
+          data: uanData
+        });
+      }
+    }
+
+    // Fallback: employment verification onboarding UAN API response
+    const evRows = await executeQuery(
+      `SELECT uan_api_response, uan_number, uan_api_result_code
+       FROM employment_verification_records
+       WHERE user_id = ? AND uan_api_response IS NOT NULL
+       ORDER BY id DESC LIMIT 1`,
+      [userIdInt]
+    );
+    if (evRows.length > 0 && evRows[0].uan_api_response) {
+      let uanData = evRows[0].uan_api_response;
+      if (typeof uanData === 'string') {
+        try {
+          uanData = JSON.parse(uanData);
+        } catch (e) {
+          uanData = null;
+        }
+      }
+      if (uanData) {
+        return res.json({
+          success: true,
+          data: uanData
+        });
+      }
     }
 
     return res.json({
