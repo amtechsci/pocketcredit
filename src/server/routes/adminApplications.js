@@ -271,8 +271,17 @@ router.get('/', authenticateAdmin, async (req, res) => {
         whereConditions.push(`NOT EXISTS (
           SELECT 1 FROM employment_verification_records evr
           WHERE evr.user_id = la.user_id
-            AND (evr.loan_application_id = la.id OR evr.loan_application_id IS NULL)
-            AND evr.status = 'docs_verify'
+            AND (evr.loan_application_id = la.id OR (evr.loan_application_id IS NULL AND evr.id = (
+              SELECT MAX(evr3.id) FROM employment_verification_records evr3 WHERE evr3.user_id = la.user_id
+            )))
+            AND (
+              evr.status = 'docs_verify'
+              OR (
+                evr.status NOT IN ('verified')
+                AND evr.payslip_document_id IS NOT NULL
+                AND evr.company_id_document_id IS NOT NULL
+              )
+            )
             AND evr.id = (
               SELECT MAX(evr2.id) FROM employment_verification_records evr2
               WHERE evr2.user_id = la.user_id
@@ -2149,7 +2158,14 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
                    SELECT 1 FROM employment_verification_records evr
                    WHERE evr.user_id = la.user_id
                      AND (evr.loan_application_id = la.id OR evr.loan_application_id IS NULL)
-                     AND evr.status = 'docs_verify'
+                     AND (
+                      evr.status = 'docs_verify'
+                      OR (
+                        evr.status NOT IN ('verified')
+                        AND evr.payslip_document_id IS NOT NULL
+                        AND evr.company_id_document_id IS NOT NULL
+                      )
+                    )
                      AND evr.id = (
                        SELECT MAX(evr2.id) FROM employment_verification_records evr2
                        WHERE evr2.user_id = la.user_id
@@ -2187,7 +2203,14 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
                    SELECT 1 FROM employment_verification_records evr
                    WHERE evr.user_id = la.user_id
                      AND (evr.loan_application_id = la.id OR evr.loan_application_id IS NULL)
-                     AND evr.status = 'docs_verify'
+                     AND (
+                      evr.status = 'docs_verify'
+                      OR (
+                        evr.status NOT IN ('verified')
+                        AND evr.payslip_document_id IS NOT NULL
+                        AND evr.company_id_document_id IS NOT NULL
+                      )
+                    )
                      AND evr.id = (
                        SELECT MAX(evr2.id) FROM employment_verification_records evr2
                        WHERE evr2.user_id = la.user_id
@@ -2274,7 +2297,14 @@ router.get('/stats/overview', authenticateAdmin, async (req, res) => {
             SELECT 1 FROM employment_verification_records evr
             WHERE evr.user_id = la.user_id
               AND (evr.loan_application_id = la.id OR evr.loan_application_id IS NULL)
-              AND evr.status = 'docs_verify'
+              AND (
+                evr.status = 'docs_verify'
+                OR (
+                  evr.status NOT IN ('verified')
+                  AND evr.payslip_document_id IS NOT NULL
+                  AND evr.company_id_document_id IS NOT NULL
+                )
+              )
               AND evr.id = (
                 SELECT MAX(evr2.id) FROM employment_verification_records evr2
                 WHERE evr2.user_id = la.user_id
@@ -2434,7 +2464,14 @@ router.get('/export/sales-tracker-minimal', authenticateAdmin, async (req, res) 
             SELECT 1 FROM employment_verification_records evr
             WHERE evr.user_id = la.user_id
               AND (evr.loan_application_id = la.id OR evr.loan_application_id IS NULL)
-              AND evr.status = 'docs_verify'
+              AND (
+                evr.status = 'docs_verify'
+                OR (
+                  evr.status NOT IN ('verified')
+                  AND evr.payslip_document_id IS NOT NULL
+                  AND evr.company_id_document_id IS NOT NULL
+                )
+              )
               AND evr.id = (
                 SELECT MAX(evr2.id) FROM employment_verification_records evr2
                 WHERE evr2.user_id = la.user_id
@@ -2653,7 +2690,14 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
           SELECT 1 FROM employment_verification_records evr
           WHERE evr.user_id = la.user_id
             AND (evr.loan_application_id = la.id OR evr.loan_application_id IS NULL)
-            AND evr.status = 'docs_verify'
+            AND (
+              evr.status = 'docs_verify'
+              OR (
+                evr.status NOT IN ('verified')
+                AND evr.payslip_document_id IS NOT NULL
+                AND evr.company_id_document_id IS NOT NULL
+              )
+            )
             AND evr.id = (
               SELECT MAX(evr2.id) FROM employment_verification_records evr2
               WHERE evr2.user_id = la.user_id

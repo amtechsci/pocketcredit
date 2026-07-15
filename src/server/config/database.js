@@ -262,6 +262,24 @@ const ensureEmploymentVerificationTable = async () => {
         KEY idx_evr_user_loan (user_id, loan_application_id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
+
+    // Existing installs may lack enum values added later — CREATE IF NOT EXISTS won't alter them.
+    try {
+      await executeQuery(`
+        ALTER TABLE employment_verification_records
+        MODIFY COLUMN status ENUM('pending','verified','docs_verify','failed') NOT NULL DEFAULT 'pending'
+      `);
+    } catch (e) {
+      console.warn('employment_verification_records.status enum migrate:', e.message);
+    }
+    try {
+      await executeQuery(`
+        ALTER TABLE employment_verification_records
+        MODIFY COLUMN method ENUM('uan_pan_api','company_email_otp','uan_number_manual','manual_docs') DEFAULT NULL
+      `);
+    } catch (e) {
+      console.warn('employment_verification_records.method enum migrate:', e.message);
+    }
   } catch (err) {
     console.error('ensureEmploymentVerificationTable error:', err.message);
   }

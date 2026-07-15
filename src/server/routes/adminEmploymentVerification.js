@@ -5,6 +5,20 @@ const { authenticateAdmin } = require('../middleware/auth');
 const { markVerified } = require('../services/employmentVerificationService');
 
 /**
+ * Rows waiting for admin document review:
+ * - status = docs_verify, or
+ * - both payslip + company ID uploaded but not yet verified (heal / catch status miss)
+ */
+const DOCS_VERIFY_WHERE = `(
+  evr.status = 'docs_verify'
+  OR (
+    evr.status NOT IN ('verified')
+    AND evr.payslip_document_id IS NOT NULL
+    AND evr.company_id_document_id IS NOT NULL
+  )
+)`;
+
+/**
  * GET /api/admin/employment-verification/docs-verify
  */
 router.get('/docs-verify', authenticateAdmin, async (req, res) => {
@@ -15,34 +29,55 @@ router.get('/docs-verify', authenticateAdmin, async (req, res) => {
     const offset = (page - 1) * limit;
     const search = (req.query.search || '').trim();
 
-    let whereClause = "evr.status = 'docs_verify'";
+    let whereClause = DOCS_VERIFY_WHERE;
     const params = [];
 
     if (search) {
       whereClause += ` AND (
         u.first_name LIKE ? OR u.last_name LIKE ? OR u.phone LIKE ? OR
-        u.email LIKE ? OR la.application_number LIKE ? OR la.id = ?
+        u.email LIKE ? OR la.application_number LIKE ? OR CAST(la.id AS CHAR) = ? OR
+        CONCAT('PLL', la.id) LIKE ? OR CAST(evr.user_id AS CHAR) = ?
       )`;
       const term = `%${search}%`;
-      const loanId = /^\d+$/.test(search) ? parseInt(search, 10) : null;
-      params.push(term, term, term, term, term, loanId || -1);
+      const digits = search.replace(/\D/g, '');
+      const loanId = /^\d+$/.test(digits) ? digits : search;
+      params.push(term, term, term, term, term, loanId, term, digits || search);
+    }
+
+    // Heal: if both docs are present but status was never flipped to docs_verify
+    try {
+      await executeQuery(
+        `UPDATE employment_verification_records
+         SET status = 'docs_verify',
+             method = COALESCE(method, 'manual_docs'),
+             updated_at = NOW()
+         WHERE status NOT IN ('verified', 'docs_verify')
+           AND payslip_document_id IS NOT NULL
+           AND company_id_document_id IS NOT NULL`
+      );
+    } catch (healErr) {
+      console.warn('docs-verify heal update skipped:', healErr.message);
     }
 
     const countRows = await executeQuery(
       `SELECT COUNT(*) AS total
        FROM employment_verification_records evr
        JOIN users u ON u.id = evr.user_id
-       LEFT JOIN loan_applications la ON la.id = evr.loan_application_id
+       LEFT JOIN loan_applications la ON la.id = COALESCE(
+         evr.loan_application_id,
+         (SELECT MAX(la2.id) FROM loan_applications la2 WHERE la2.user_id = evr.user_id)
+       )
        WHERE ${whereClause}`,
       params
     );
-    const total = countRows[0]?.total || 0;
+    const total = Number(countRows[0]?.total || 0);
 
+    // Interpolate LIMIT/OFFSET — mysql2 prepared LIMIT ? often throws and returns empty list
     const rows = await executeQuery(
       `SELECT
          evr.id AS record_id,
          evr.user_id,
-         evr.loan_application_id,
+         COALESCE(evr.loan_application_id, la.id) AS loan_application_id,
          evr.status,
          evr.payslip_s3_key,
          evr.company_id_s3_key,
@@ -60,28 +95,34 @@ router.get('/docs-verify', authenticateAdmin, async (req, res) => {
          lad_c.file_path AS company_id_url
        FROM employment_verification_records evr
        JOIN users u ON u.id = evr.user_id
-       LEFT JOIN loan_applications la ON la.id = evr.loan_application_id
+       LEFT JOIN loan_applications la ON la.id = COALESCE(
+         evr.loan_application_id,
+         (SELECT MAX(la2.id) FROM loan_applications la2 WHERE la2.user_id = evr.user_id)
+       )
        LEFT JOIN loan_application_documents lad_p ON lad_p.id = evr.payslip_document_id
        LEFT JOIN loan_application_documents lad_c ON lad_c.id = evr.company_id_document_id
        WHERE ${whereClause}
        ORDER BY evr.updated_at DESC
-       LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
+       LIMIT ${limit} OFFSET ${offset}`,
+      params
     );
 
     res.json({
       status: 'success',
       data: {
-        records: rows,
+        records: rows || [],
         total,
         page,
         limit,
-        totalPages: Math.ceil(total / limit)
+        totalPages: Math.ceil(total / limit) || 0
       }
     });
   } catch (error) {
     console.error('docs-verify list error:', error);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch docs verify list' });
+    res.status(500).json({
+      status: 'error',
+      message: error.message || 'Failed to fetch docs verify list'
+    });
   }
 });
 
@@ -98,12 +139,25 @@ router.post('/approve-selected', authenticateAdmin, async (req, res) => {
       return res.status(400).json({ status: 'error', message: 'recordIds array is required' });
     }
 
-    const placeholders = recordIds.map(() => '?').join(',');
+    const ids = recordIds.map((id) => parseInt(id, 10)).filter((id) => !isNaN(id));
+    if (ids.length === 0) {
+      return res.status(400).json({ status: 'error', message: 'No valid recordIds' });
+    }
+
+    const placeholders = ids.map(() => '?').join(',');
     const rows = await executeQuery(
       `SELECT id, user_id, loan_application_id, status
        FROM employment_verification_records
-       WHERE id IN (${placeholders}) AND status = 'docs_verify'`,
-      recordIds
+       WHERE id IN (${placeholders})
+         AND (
+           status = 'docs_verify'
+           OR (
+             status NOT IN ('verified')
+             AND payslip_document_id IS NOT NULL
+             AND company_id_document_id IS NOT NULL
+           )
+         )`,
+      ids
     );
 
     if (rows.length === 0) {
