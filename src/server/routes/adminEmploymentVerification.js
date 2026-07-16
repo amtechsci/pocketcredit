@@ -78,7 +78,7 @@ router.get('/docs-verify', authenticateAdmin, async (req, res) => {
          evr.id AS record_id,
          evr.user_id,
          COALESCE(evr.loan_application_id, la.id) AS loan_application_id,
-         evr.status,
+         evr.status AS ev_status,
          evr.payslip_s3_key,
          evr.company_id_s3_key,
          evr.payslip_document_id,
@@ -91,6 +91,15 @@ router.get('/docs-verify', authenticateAdmin, async (req, res) => {
          u.email,
          la.application_number,
          la.loan_amount,
+         la.loan_purpose,
+         la.status AS loan_status,
+         DATE_FORMAT(la.created_at, '%Y-%m-%d') AS application_date,
+         ed.employment_type,
+         ed.company_name,
+         av.name AS verify_user_name,
+         af.name AS follow_up_user_name,
+         am.name AS acc_manager_name,
+         ar.name AS recovery_officer_name,
          lad_p.file_path AS payslip_url,
          lad_c.file_path AS company_id_url
        FROM employment_verification_records evr
@@ -99,6 +108,17 @@ router.get('/docs-verify', authenticateAdmin, async (req, res) => {
          evr.loan_application_id,
          (SELECT MAX(la2.id) FROM loan_applications la2 WHERE la2.user_id = evr.user_id)
        )
+       LEFT JOIN (
+         SELECT ed1.user_id, ed1.employment_type, ed1.company_name
+         FROM employment_details ed1
+         WHERE ed1.id = (
+           SELECT MAX(ed2.id) FROM employment_details ed2 WHERE ed2.user_id = ed1.user_id
+         )
+       ) ed ON ed.user_id = u.id
+       LEFT JOIN admins av ON la.assigned_verify_admin_id COLLATE utf8mb4_unicode_ci = av.id
+       LEFT JOIN admins af ON la.assigned_follow_up_admin_id COLLATE utf8mb4_unicode_ci = af.id
+       LEFT JOIN admins am ON la.assigned_account_manager_id COLLATE utf8mb4_unicode_ci = am.id
+       LEFT JOIN admins ar ON la.assigned_recovery_officer_id COLLATE utf8mb4_unicode_ci = ar.id
        LEFT JOIN loan_application_documents lad_p ON lad_p.id = evr.payslip_document_id
        LEFT JOIN loan_application_documents lad_c ON lad_c.id = evr.company_id_document_id
        WHERE ${whereClause}
