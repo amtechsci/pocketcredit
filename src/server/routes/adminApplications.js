@@ -49,21 +49,38 @@ function formatDateDDMMYYYY(date) {
 }
 
 /**
- * Submitted-tab employment sub-filters (alias `ev` = latest employment_verification_records).
- * - uan_verified: UAN path verified, or UAN fetched (101) but steps still pending
+ * Submitted-tab employment sub-filters.
+ * Uses EXISTS so an older approved docs/UAN row still matches even if a newer pending
+ * employment_verification_records row exists for the same user.
+ * - uan_verified: UAN path verified, or UAN fetched (101) with steps still pending
  * - docs_verified: approved from Docs Verify tab (method = manual_docs)
  * - just_submitted: applied / incomplete — neither of the above
  */
 function submittedSubFilterSql(submittedSub) {
   const uan = `(
-    (ev.status = 'verified' AND ev.method IN ('uan_pan_api', 'uan_number_manual'))
-    OR (COALESCE(ev.status, 'pending') = 'pending' AND ev.uan_api_result_code = 101)
+    EXISTS (
+      SELECT 1 FROM employment_verification_records evr_u
+      WHERE evr_u.user_id = la.user_id
+        AND (evr_u.loan_application_id = la.id OR evr_u.loan_application_id IS NULL)
+        AND (
+          (evr_u.status = 'verified' AND evr_u.method IN ('uan_pan_api', 'uan_number_manual'))
+          OR (COALESCE(evr_u.status, 'pending') = 'pending' AND evr_u.uan_api_result_code = 101)
+        )
+    )
   )`;
-  const docs = `(ev.status = 'verified' AND ev.method = 'manual_docs')`;
+  const docs = `(
+    EXISTS (
+      SELECT 1 FROM employment_verification_records evr_d
+      WHERE evr_d.user_id = la.user_id
+        AND (evr_d.loan_application_id = la.id OR evr_d.loan_application_id IS NULL)
+        AND evr_d.status = 'verified'
+        AND evr_d.method = 'manual_docs'
+    )
+  )`;
   const key = String(submittedSub || '').toLowerCase().trim();
-  if (key === 'uan_verified') return uan;
+  if (key === 'uan_verified') return `(${uan} AND NOT ${docs})`;
   if (key === 'docs_verified') return docs;
-  if (key === 'just_submitted') return `(NOT (${uan}) AND NOT (${docs}))`;
+  if (key === 'just_submitted') return `(NOT ${uan} AND NOT ${docs})`;
   return null;
 }
 

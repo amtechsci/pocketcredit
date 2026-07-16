@@ -158,6 +158,17 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
   const [redistributingSubmitted, setRedistributingSubmitted] = useState(false);
   const [verifyingRepeatQa, setVerifyingRepeatQa] = useState(false);
 
+  // Keep statusFilter in sync when parent passes initialStatus (Sales Tracker / Over Due pages)
+  useEffect(() => {
+    if (initialStatus && initialStatus !== statusFilter) {
+      setStatusFilter(initialStatus);
+      if (initialStatus === 'submitted') {
+        setSubmittedSub('just_submitted');
+      }
+      setCurrentPage(1);
+    }
+  }, [initialStatus]);
+
   // Initialize status filter from URL parameters (ignore when initialStatus is set, e.g. Over Due page)
   useEffect(() => {
     if (initialStatus) return;
@@ -1337,11 +1348,15 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
 
           {/* Submitted sub-tabs: UAN Verified / Docs Verified / Just Submitted */}
           {statusFilter === 'submitted' && (
-            <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-gray-100 mt-2">
+            <div className="flex flex-col gap-2 pt-3 border-t border-purple-100 mt-2 bg-purple-50/40 -mx-3 sm:mx-0 px-3 sm:px-4 py-3 rounded-lg">
+              <p className="text-xs font-semibold uppercase tracking-wide text-purple-800">
+                Submitted queues
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => handleSubmittedSub('uan_verified')}
-                className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors whitespace-nowrap ${
+                className={`px-4 py-2.5 text-sm font-semibold rounded-lg transition-colors whitespace-nowrap ${
                   submittedSub === 'uan_verified'
                     ? 'bg-emerald-600 text-white shadow-sm'
                     : 'bg-white text-gray-700 hover:bg-emerald-50 border border-gray-200'
@@ -1358,7 +1373,7 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
               <button
                 type="button"
                 onClick={() => handleSubmittedSub('docs_verified')}
-                className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors whitespace-nowrap ${
+                className={`px-4 py-2.5 text-sm font-semibold rounded-lg transition-colors whitespace-nowrap ${
                   submittedSub === 'docs_verified'
                     ? 'bg-amber-600 text-white shadow-sm'
                     : 'bg-white text-gray-700 hover:bg-amber-50 border border-gray-200'
@@ -1375,7 +1390,7 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
               <button
                 type="button"
                 onClick={() => handleSubmittedSub('just_submitted')}
-                className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors whitespace-nowrap ${
+                className={`px-4 py-2.5 text-sm font-semibold rounded-lg transition-colors whitespace-nowrap ${
                   submittedSub === 'just_submitted'
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'bg-white text-gray-700 hover:bg-indigo-50 border border-gray-200'
@@ -1389,6 +1404,7 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
                   {submittedSubCounts?.just_submitted ?? 0}
                 </span>
               </button>
+              </div>
             </div>
           )}
 

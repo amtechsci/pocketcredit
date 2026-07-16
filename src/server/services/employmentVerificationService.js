@@ -48,8 +48,28 @@ async function getLatestRecord(userId, loanApplicationId) {
 
 async function getOrCreateRecord(userId, loanApplicationId) {
   const existing = await getLatestRecord(userId, loanApplicationId);
-  if (existing && existing.loan_application_id === loanApplicationId) {
-    return existing;
+  if (existing) {
+    // Reuse latest row for this user/loan — never insert a new pending row after docs were
+    // approved (that would hide them from Submitted → DOCS VERIFIED via MAX(id) join).
+    if (
+      existing.loan_application_id == null &&
+      loanApplicationId != null
+    ) {
+      await executeQuery(
+        `UPDATE employment_verification_records
+         SET loan_application_id = ?, updated_at = NOW()
+         WHERE id = ?`,
+        [loanApplicationId, existing.id]
+      );
+      existing.loan_application_id = loanApplicationId;
+    }
+    if (
+      existing.loan_application_id === loanApplicationId ||
+      existing.loan_application_id == null ||
+      loanApplicationId == null
+    ) {
+      return existing;
+    }
   }
 
   const result = await executeQuery(
