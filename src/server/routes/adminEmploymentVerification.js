@@ -6,16 +6,20 @@ const { markVerified } = require('../services/employmentVerificationService');
 
 /**
  * Rows waiting for admin document review:
- * - status = docs_verify, or
- * - both payslip + company ID uploaded but not yet verified (heal / catch status miss)
+ * - employment docs pending (docs_verify / both docs uploaded), AND
+ * - loan still in Submitted only (exclude Under Review, Ready to Repeat Disbursal, etc.)
  */
 const DOCS_VERIFY_WHERE = `(
-  evr.status = 'docs_verify'
-  OR (
-    evr.status NOT IN ('verified')
-    AND evr.payslip_document_id IS NOT NULL
-    AND evr.company_id_document_id IS NOT NULL
+  (
+    evr.status = 'docs_verify'
+    OR (
+      evr.status NOT IN ('verified')
+      AND evr.payslip_document_id IS NOT NULL
+      AND evr.company_id_document_id IS NOT NULL
+    )
   )
+  AND la.id IS NOT NULL
+  AND la.status = 'submitted'
 )`;
 
 /**
