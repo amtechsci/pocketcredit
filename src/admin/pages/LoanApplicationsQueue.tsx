@@ -111,6 +111,12 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState(initialStatus || 'all');
+  const [submittedSub, setSubmittedSub] = useState<'uan_verified' | 'docs_verified' | 'just_submitted'>('just_submitted');
+  const [submittedSubCounts, setSubmittedSubCounts] = useState<{
+    uan_verified: number;
+    docs_verified: number;
+    just_submitted: number;
+  } | null>(null);
   const [sortBy, setSortBy] = useState('updatedAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const { canApproveLoans, canRejectLoans, currentUser, isNbfcAdmin, shouldMaskMobile } = useAdmin();
@@ -156,6 +162,14 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
   useEffect(() => {
     if (initialStatus) return;
     const statusFromUrl = searchParams.get('status');
+    const submittedSubFromUrl = searchParams.get('submittedSub');
+    if (
+      submittedSubFromUrl === 'uan_verified' ||
+      submittedSubFromUrl === 'docs_verified' ||
+      submittedSubFromUrl === 'just_submitted'
+    ) {
+      setSubmittedSub(submittedSubFromUrl);
+    }
     const validStatuses = ['all', 'submitted', 'under_review', 'follow_up', 'disbursal', 'account_manager', 'overdue', 'cleared', 'rejected', 'ready_for_disbursement', 'repeat_disbursal', 'ready_to_repeat_disbursal', 'repeat_qa_pending'];
     if (statusFromUrl && validStatuses.includes(statusFromUrl)) {
       if (statusFromUrl === 'repeat_qa_pending' && !isMainAdmin) {
@@ -213,11 +227,40 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
       // Clear search when switching tabs so list matches tab badges (search was narrowing the table)
       setSearchInput('');
       setSearchTerm('');
+      if (value === 'submitted') {
+        setSubmittedSub('just_submitted');
+      }
       if (!initialStatus) {
         setSearchParams(
           (prev) => {
             const n = new URLSearchParams(prev);
             n.set('status', value);
+            if (value === 'submitted') {
+              n.set('submittedSub', 'just_submitted');
+            } else {
+              n.delete('submittedSub');
+            }
+            return n;
+          },
+          { replace: true }
+        );
+      }
+    },
+    [initialStatus, setSearchParams]
+  );
+
+  const handleSubmittedSub = useCallback(
+    (value: 'uan_verified' | 'docs_verified' | 'just_submitted') => {
+      setSubmittedSub(value);
+      setCurrentPage(1);
+      setSearchInput('');
+      setSearchTerm('');
+      if (!initialStatus) {
+        setSearchParams(
+          (prev) => {
+            const n = new URLSearchParams(prev);
+            n.set('status', 'submitted');
+            n.set('submittedSub', value);
             return n;
           },
           { replace: true }
@@ -314,6 +357,7 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
           limit: pageSize,
           status: isRepeatQaTab ? 'ready_to_repeat_disbursal' : statusFilter,
           ...(isRepeatQaTab ? { repeatQaPending: '1' } : {}),
+          ...(statusFilter === 'submitted' ? { submittedSub } : {}),
           search: searchTerm,
           sortBy,
           sortOrder,
@@ -323,6 +367,11 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
         if (response.status === 'success') {
           setApplications(response.data.applications);
           setPagination(response.data.pagination);
+          if (response.data.submittedSubCounts) {
+            setSubmittedSubCounts(response.data.submittedSubCounts);
+          } else if (statusFilter !== 'submitted') {
+            setSubmittedSubCounts(null);
+          }
         } else {
           console.error('❌ API Error:', response.message);
           setError(response.message || 'Failed to fetch applications');
@@ -336,7 +385,7 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
     };
 
     fetchApplications();
-  }, [currentPage, pageSize, statusFilter, searchTerm, sortBy, sortOrder, loanAmountFilter]);
+  }, [currentPage, pageSize, statusFilter, submittedSub, searchTerm, sortBy, sortOrder, loanAmountFilter]);
 
   const refreshStats = useCallback(async () => {
     try {
@@ -477,6 +526,9 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
     try {
       setDownloadingExcel(status);
       const filters: any = { status };
+      if (status === 'submitted') {
+        filters.submittedSub = submittedSub;
+      }
       const blob = await adminApiService.exportApplicationsExcel(filters);
       
       // Create download link
@@ -1283,6 +1335,63 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
             )}
           </div>
 
+          {/* Submitted sub-tabs: UAN Verified / Docs Verified / Just Submitted */}
+          {statusFilter === 'submitted' && (
+            <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-gray-100 mt-2">
+              <button
+                type="button"
+                onClick={() => handleSubmittedSub('uan_verified')}
+                className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors whitespace-nowrap ${
+                  submittedSub === 'uan_verified'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'bg-white text-gray-700 hover:bg-emerald-50 border border-gray-200'
+                }`}
+                title="UAN verified but pending steps not completed"
+              >
+                UAN VERIFIED
+                <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${
+                  submittedSub === 'uan_verified' ? 'bg-emerald-700 text-white' : 'bg-gray-100 text-gray-800'
+                }`}>
+                  {submittedSubCounts?.uan_verified ?? 0}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSubmittedSub('docs_verified')}
+                className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors whitespace-nowrap ${
+                  submittedSub === 'docs_verified'
+                    ? 'bg-amber-600 text-white shadow-sm'
+                    : 'bg-white text-gray-700 hover:bg-amber-50 border border-gray-200'
+                }`}
+                title="Approved from Docs Verify tab"
+              >
+                DOCS VERIFIED
+                <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${
+                  submittedSub === 'docs_verified' ? 'bg-amber-700 text-white' : 'bg-gray-100 text-gray-800'
+                }`}>
+                  {submittedSubCounts?.docs_verified ?? 0}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSubmittedSub('just_submitted')}
+                className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors whitespace-nowrap ${
+                  submittedSub === 'just_submitted'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'bg-white text-gray-700 hover:bg-indigo-50 border border-gray-200'
+                }`}
+                title="Applied but pending steps not completed"
+              >
+                JUST SUBMITTED
+                <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${
+                  submittedSub === 'just_submitted' ? 'bg-indigo-700 text-white' : 'bg-gray-100 text-gray-800'
+                }`}>
+                  {submittedSubCounts?.just_submitted ?? 0}
+                </span>
+              </button>
+            </div>
+          )}
+
           {/* Loan Amount Filter - Below 3k / 3k-8k / 8k above (all tabs) */}
           {showLoanAmountFilters && (
             <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100 mt-2">
@@ -1700,8 +1809,10 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
                       {statusFilter === 'submitted' && application.uanStatus && application.uanStatus !== '—' && (
                         <span
                           className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                            application.uanStatus === 'Verified'
+                            application.uanStatus === 'UAN Verified' || application.uanStatus === 'Verified'
                               ? 'bg-green-100 text-green-800'
+                              : application.uanStatus === 'Docs Verified'
+                                ? 'bg-amber-100 text-amber-900'
                               : application.uanStatus === 'Docs Verify'
                                 ? 'bg-amber-100 text-amber-800'
                                 : application.uanStatus === 'UAN Fetched'
@@ -1711,7 +1822,7 @@ export function LoanApplicationsQueue({ initialStatus, hideDownloads: hideDownlo
                                     : 'bg-gray-100 text-gray-700'
                           }`}
                         >
-                          UAN: {application.uanStatus}
+                          {application.uanStatus}
                         </span>
                       )}
                     </div>

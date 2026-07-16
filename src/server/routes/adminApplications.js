@@ -48,6 +48,49 @@ function formatDateDDMMYYYY(date) {
   return `${day}${month}${year}`;
 }
 
+/**
+ * Submitted-tab employment sub-filters (alias `ev` = latest employment_verification_records).
+ * - uan_verified: UAN path verified, or UAN fetched (101) but steps still pending
+ * - docs_verified: approved from Docs Verify tab (method = manual_docs)
+ * - just_submitted: applied / incomplete — neither of the above
+ */
+function submittedSubFilterSql(submittedSub) {
+  const uan = `(
+    (ev.status = 'verified' AND ev.method IN ('uan_pan_api', 'uan_number_manual'))
+    OR (COALESCE(ev.status, 'pending') = 'pending' AND ev.uan_api_result_code = 101)
+  )`;
+  const docs = `(ev.status = 'verified' AND ev.method = 'manual_docs')`;
+  const key = String(submittedSub || '').toLowerCase().trim();
+  if (key === 'uan_verified') return uan;
+  if (key === 'docs_verified') return docs;
+  if (key === 'just_submitted') return `(NOT (${uan}) AND NOT (${docs}))`;
+  return null;
+}
+
+/** Exclude profiles still awaiting Docs Verify review from the Submitted queue. */
+function pushSubmittedDocsVerifyExclude(whereConditions) {
+  whereConditions.push(`NOT EXISTS (
+    SELECT 1 FROM employment_verification_records evr
+    WHERE evr.user_id = la.user_id
+      AND (evr.loan_application_id = la.id OR (evr.loan_application_id IS NULL AND evr.id = (
+        SELECT MAX(evr3.id) FROM employment_verification_records evr3 WHERE evr3.user_id = la.user_id
+      )))
+      AND (
+        evr.status = 'docs_verify'
+        OR (
+          evr.status NOT IN ('verified')
+          AND evr.payslip_document_id IS NOT NULL
+          AND evr.company_id_document_id IS NOT NULL
+        )
+      )
+      AND evr.id = (
+        SELECT MAX(evr2.id) FROM employment_verification_records evr2
+        WHERE evr2.user_id = la.user_id
+          AND (evr2.loan_application_id = la.id OR evr2.loan_application_id IS NULL)
+      )
+  )`);
+}
+
 /** Admin list/profile: show Submitted until E-NACH completes (legacy rows may be under_review with enach_done = 0). */
 function effectiveAdminLoanStatus(status, enachDone) {
   if (status === 'under_review' && Number(enachDone) !== 1) return 'submitted';
@@ -70,7 +113,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
       dateFrom = '',
       dateTo = '',
       loanAmountFilter = '',
-      repeatQaPending = ''
+      repeatQaPending = '',
+      submittedSub = ''
     } = req.query;
 
     // Enforce status by role: sub-admins and NBFC only see allowed statuses (backend permission)
@@ -243,6 +287,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
 
     let whereConditions = [];
     let queryParams = [];
+    let submittedSubSqlPending = null;
 
     // Direct loan id lookup (PLL123 / 123) — same rules as search block below
     const trimmedSearchForLoanId = search ? String(search).trim() : '';
@@ -268,26 +313,9 @@ router.get('/', authenticateAdmin, async (req, res) => {
       if (effectiveStatus === 'submitted') {
         whereConditions.push(`(la.status = 'submitted' OR (la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 0))`);
         // Docs under employment review belong in Docs Verify tab, not Submitted
-        whereConditions.push(`NOT EXISTS (
-          SELECT 1 FROM employment_verification_records evr
-          WHERE evr.user_id = la.user_id
-            AND (evr.loan_application_id = la.id OR (evr.loan_application_id IS NULL AND evr.id = (
-              SELECT MAX(evr3.id) FROM employment_verification_records evr3 WHERE evr3.user_id = la.user_id
-            )))
-            AND (
-              evr.status = 'docs_verify'
-              OR (
-                evr.status NOT IN ('verified')
-                AND evr.payslip_document_id IS NOT NULL
-                AND evr.company_id_document_id IS NOT NULL
-              )
-            )
-            AND evr.id = (
-              SELECT MAX(evr2.id) FROM employment_verification_records evr2
-              WHERE evr2.user_id = la.user_id
-                AND (evr2.loan_application_id = la.id OR evr2.loan_application_id IS NULL)
-            )
-        )`);
+        pushSubmittedDocsVerifyExclude(whereConditions);
+        // Apply after other filters so we can compute all three sub-tab counts
+        submittedSubSqlPending = submittedSubFilterSql(submittedSub || 'just_submitted');
       } else if (effectiveStatus === 'under_review') {
         whereConditions.push(`(la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 1)`);
       } else {
@@ -405,6 +433,40 @@ router.get('/', authenticateAdmin, async (req, res) => {
       }
     }
 
+    // Get total count for pagination (use DISTINCT count to match the main query)
+    // Include same latest-EV join as list query so submittedSub filters on `ev` work
+    const evJoinSql = `
+      LEFT JOIN employment_verification_records ev ON ev.id = (
+        SELECT MAX(ev2.id)
+        FROM employment_verification_records ev2
+        WHERE ev2.user_id = la.user_id
+          AND (ev2.loan_application_id = la.id OR ev2.loan_application_id IS NULL)
+      )`;
+
+    let submittedSubCounts = null;
+    if (submittedSubSqlPending) {
+      const countBaseFrom = `
+        FROM loan_applications la
+        LEFT JOIN users u ON la.user_id = u.id
+        ${evJoinSql}
+      `;
+      const baseWhere = whereConditions.length > 0 ? ` WHERE ${whereConditions.join(' AND ')}` : '';
+      submittedSubCounts = { uan_verified: 0, docs_verified: 0, just_submitted: 0 };
+      for (const key of ['uan_verified', 'docs_verified', 'just_submitted']) {
+        const subSql = submittedSubFilterSql(key);
+        const cq = baseWhere
+          ? `SELECT COUNT(DISTINCT la.id) as total ${countBaseFrom}${baseWhere} AND (${subSql})`
+          : `SELECT COUNT(DISTINCT la.id) as total ${countBaseFrom} WHERE (${subSql})`;
+        try {
+          const cr = await executeQuery(cq, queryParams);
+          submittedSubCounts[key] = Number(cr[0]?.total || 0);
+        } catch (e) {
+          console.warn(`submittedSub count ${key}:`, e.message);
+        }
+      }
+      whereConditions.push(submittedSubSqlPending);
+    }
+
     // Add WHERE clause if conditions exist
     if (whereConditions.length > 0) {
       baseQuery += ' WHERE ' + whereConditions.join(' AND ');
@@ -460,6 +522,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
           )
       ) a ON u.id = a.user_id
       LEFT JOIN loan_plans lp ON la.loan_plan_id = lp.id
+      ${evJoinSql}
     `;
     
     // Add WHERE conditions to count query
@@ -608,7 +671,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
       const shortLoanId = `PLL${app.id}`;
 
       const uanStatus = (() => {
-        if (app.ev_status === 'verified') return 'Verified';
+        if (app.ev_status === 'verified' && app.ev_method === 'manual_docs') return 'Docs Verified';
+        if (app.ev_status === 'verified') return 'UAN Verified';
         if (app.ev_status === 'docs_verify') return 'Docs Verify';
         if (app.ev_status === 'pending' && Number(app.uan_api_result_code) === 101) return 'UAN Fetched';
         if (app.uan_api_result_code && [102, 103].includes(Number(app.uan_api_result_code))) return 'UAN Not Found';
@@ -719,7 +783,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
           hasNextPage,
           hasPrevPage,
           limit: parseInt(limit)
-        }
+        },
+        ...(submittedSubCounts ? { submittedSubCounts } : {})
       }
     });
 
@@ -2525,7 +2590,8 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
       search = '',
       dateFrom = '',
       dateTo = '',
-      repeatQaPending = ''
+      repeatQaPending = '',
+      submittedSub = ''
     } = req.query;
 
     // Enforce status by role (same as list endpoint)
@@ -2660,6 +2726,12 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
           WHERE cc2.user_id = cc1.user_id
         )
       ) cc ON u.id = cc.user_id
+      LEFT JOIN employment_verification_records ev ON ev.id = (
+        SELECT MAX(ev2.id)
+        FROM employment_verification_records ev2
+        WHERE ev2.user_id = la.user_id
+          AND (ev2.loan_application_id = la.id OR ev2.loan_application_id IS NULL)
+      )
     `;
 
     let whereConditions = [];
@@ -2686,24 +2758,9 @@ router.get('/export/excel', authenticateAdmin, async (req, res) => {
     if (effectiveStatus && effectiveStatus !== 'all') {
       if (effectiveStatus === 'submitted') {
         whereConditions.push(`(la.status = 'submitted' OR (la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 0))`);
-        whereConditions.push(`NOT EXISTS (
-          SELECT 1 FROM employment_verification_records evr
-          WHERE evr.user_id = la.user_id
-            AND (evr.loan_application_id = la.id OR evr.loan_application_id IS NULL)
-            AND (
-              evr.status = 'docs_verify'
-              OR (
-                evr.status NOT IN ('verified')
-                AND evr.payslip_document_id IS NOT NULL
-                AND evr.company_id_document_id IS NOT NULL
-              )
-            )
-            AND evr.id = (
-              SELECT MAX(evr2.id) FROM employment_verification_records evr2
-              WHERE evr2.user_id = la.user_id
-                AND (evr2.loan_application_id = la.id OR evr2.loan_application_id IS NULL)
-            )
-        )`);
+        pushSubmittedDocsVerifyExclude(whereConditions);
+        const exportSubSql = submittedSubFilterSql(submittedSub || 'just_submitted');
+        if (exportSubSql) whereConditions.push(exportSubSql);
       } else if (effectiveStatus === 'under_review') {
         whereConditions.push(`(la.status = 'under_review' AND COALESCE(la.enach_done, 0) = 1)`);
       } else {
