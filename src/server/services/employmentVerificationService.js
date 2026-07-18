@@ -121,6 +121,32 @@ async function markVerified(recordId, method, extra = {}) {
   );
 }
 
+function getIsEmployed(uanResponse) {
+  if (!uanResponse) return null;
+
+  let response = uanResponse;
+  if (typeof response === 'string') {
+    try {
+      response = JSON.parse(response);
+    } catch {
+      return null;
+    }
+  }
+
+  const value =
+    response?.result?.summary?.is_employed ??
+    response?.data?.result?.summary?.is_employed ??
+    response?.summary?.is_employed;
+
+  if (value === true || value === 1 || value === '1' || String(value).toLowerCase() === 'true') {
+    return true;
+  }
+  if (value === false || value === 0 || value === '0' || String(value).toLowerCase() === 'false') {
+    return false;
+  }
+  return null;
+}
+
 async function checkUANByPAN(userId, mobile, pan, loanApplicationId) {
   const clientRefNum = generateUANClientRefNum(userId);
   const result = await getUANBasic(mobile, clientRefNum, pan);
@@ -153,13 +179,31 @@ async function checkUANByPAN(userId, mobile, pan, loanApplicationId) {
   });
 
   if (result.success && isUANSuccess(resultCode)) {
-    // UAN fetched — user must upload payslip before proceeding to credit check
+    const isEmployed = getIsEmployed(result.data);
+
+    // UAN fetched. If EPFO explicitly reports that the user is not employed,
+    // both employment documents must be reviewed by an admin.
     await executeQuery(
       `UPDATE employment_verification_records
        SET method = 'uan_pan_api', updated_at = NOW()
        WHERE id = ?`,
       [record.id]
     );
+
+    if (isEmployed === false) {
+      return {
+        success: true,
+        verified: false,
+        uanFetched: true,
+        requiresPayslipOnly: false,
+        requiresFullDocs: true,
+        result_code: resultCode,
+        message: 'Current employment could not be confirmed. Please upload your latest payslip and company ID card.',
+        shouldShowManualFlow: true,
+        data: result.data
+      };
+    }
+
     return {
       success: true,
       verified: false,
@@ -286,12 +330,17 @@ async function getEmploymentVerificationStatus(userId, loanApplicationId) {
       docs_verify: false,
       uan_fetched: false,
       requires_payslip_only: false,
+      requires_full_docs: false,
       method: null
     };
   }
 
   const uanFetched = isUANSuccess(record.uan_api_result_code);
-  const requiresPayslipOnly = record.status === 'pending' && uanFetched;
+  const requiresFullDocs =
+    record.status === 'pending' &&
+    uanFetched &&
+    getIsEmployed(record.uan_api_response) === false;
+  const requiresPayslipOnly = record.status === 'pending' && uanFetched && !requiresFullDocs;
 
   return {
     loan_application_id: appId,
@@ -301,6 +350,7 @@ async function getEmploymentVerificationStatus(userId, loanApplicationId) {
     docs_verify: record.status === 'docs_verify',
     uan_fetched: uanFetched,
     requires_payslip_only: requiresPayslipOnly,
+    requires_full_docs: requiresFullDocs,
     method: record.method,
     company_email: record.company_email,
     uan_number: record.uan_number,
@@ -327,6 +377,7 @@ module.exports = {
   markVerified,
   checkUANByPAN,
   checkUANByNumber,
+  getIsEmployed,
   getEmploymentVerificationStatus,
   assertNotAwaitingDocsReview
 };

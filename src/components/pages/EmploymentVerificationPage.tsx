@@ -104,14 +104,18 @@ export const EmploymentVerificationPage: React.FC = () => {
           return;
         }
 
-        if (response.requiresPayslipOnly || response.uanFetched) {
-          toast.success('UAN verified. Please upload your latest payslip.');
-          navigate(uploadDocsRoute(appId, 'payslip_only'), { replace: true });
+        if (response.requiresFullDocs || response.shouldShowManualFlow) {
+          toast.info(
+            response.message ||
+              'Please upload your latest payslip and company ID card for employment verification.'
+          );
+          navigate(uploadDocsRoute(appId, 'full'), { replace: true });
           return;
         }
 
-        if (response.shouldShowManualFlow) {
-          navigate(uploadDocsRoute(appId, 'full'), { replace: true });
+        if (response.requiresPayslipOnly || response.uanFetched) {
+          toast.success('UAN verified. Please upload your latest payslip.');
+          navigate(uploadDocsRoute(appId, 'payslip_only'), { replace: true });
           return;
         }
 
@@ -151,6 +155,10 @@ export const EmploymentVerificationPage: React.FC = () => {
                 `/loan-application/employment-docs-pending${appId ? `?applicationId=${appId}` : ''}`,
                 { replace: true }
               );
+              return;
+            }
+            if (statusRes.data.requires_full_docs) {
+              navigate(uploadDocsRoute(appId, 'full'), { replace: true });
               return;
             }
             if (statusRes.data.requires_payslip_only) {

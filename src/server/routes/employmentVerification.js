@@ -13,6 +13,7 @@ const {
   checkUANByNumber,
   getEmploymentVerificationStatus,
   getLatestRecord,
+  getIsEmployed,
   assertNotAwaitingDocsReview
 } = require('../services/employmentVerificationService');
 const { isUANSuccess } = require('../constants/employmentVerificationCodes');
@@ -162,13 +163,17 @@ router.post('/check-uan-by-pan', requireAuth, async (req, res) => {
     }
 
     if (existing?.status === 'pending' && isUANSuccess(existing.uan_api_result_code)) {
+      const requiresFullDocs = getIsEmployed(existing.uan_api_response) === false;
       return res.json({
         success: true,
         verified: false,
         uanFetched: true,
-        requiresPayslipOnly: true,
-        shouldShowManualFlow: false,
-        message: 'UAN verified. Please upload your latest payslip to continue.'
+        requiresPayslipOnly: !requiresFullDocs,
+        requiresFullDocs,
+        shouldShowManualFlow: requiresFullDocs,
+        message: requiresFullDocs
+          ? 'Current employment could not be confirmed. Please upload your latest payslip and company ID card.'
+          : 'UAN verified. Please upload your latest payslip to continue.'
       });
     }
 
@@ -426,6 +431,14 @@ router.post('/upload-documents', requireAuth, (req, res, next) => {
       }
 
       const record = await getOrCreateRecord(userId, applicationId);
+
+      if (payslipOnly && getIsEmployed(record.uan_api_response) === false) {
+        return res.status(400).json({
+          success: false,
+          requiresFullDocs: true,
+          message: 'Please upload both your latest payslip and company ID card for verification'
+        });
+      }
 
       if (payslipOnly && !isUANSuccess(record.uan_api_result_code)) {
         return res.status(400).json({
