@@ -172,6 +172,7 @@ function UserProfileDetail() {
   const [editingBankId, setEditingBankId] = useState<string | null>(null);
   const [showAddReferenceModal, setShowAddReferenceModal] = useState(false);
   const [showUploadNewModal, setShowUploadNewModal] = useState(false);
+  const [documentActionLoadingId, setDocumentActionLoadingId] = useState<string | number | null>(null);
   const [showAddTransactionModal, setShowAddTransactionModal] = useState(false);
   const [submittingTransaction, setSubmittingTransaction] = useState(false);
   const [showAddFollowUpModal, setShowAddFollowUpModal] = useState(false);
@@ -3536,6 +3537,90 @@ function UserProfileDetail() {
     );
   };
 
+  // Document verification actions (Documents tab)
+  const refreshUserProfileData = async () => {
+    const profileResponse = await adminApiService.getUserProfile(params.userId!);
+    if (profileResponse.status === 'success') {
+      setUserData(profileResponse.data);
+    }
+  };
+
+  const handleApproveDocument = async (doc: any) => {
+    if (!doc?.id) {
+      alert('Document ID not found. Please refresh the page.');
+      return;
+    }
+    if (!confirm(`Approve "${doc.type}"?`)) return;
+
+    setDocumentActionLoadingId(doc.id);
+    try {
+      const response = await adminApiService.updateDocumentStatus(params.userId!, String(doc.id), 'verified');
+      if (response.status === 'success') {
+        await refreshUserProfileData();
+      } else {
+        alert(response.message || 'Failed to approve document');
+      }
+    } catch (error: any) {
+      console.error('Error approving document:', error);
+      alert(error?.response?.data?.message || 'Error approving document');
+    } finally {
+      setDocumentActionLoadingId(null);
+    }
+  };
+
+  const handleRejectDocument = async (doc: any) => {
+    if (!doc?.id) {
+      alert('Document ID not found. Please refresh the page.');
+      return;
+    }
+    const reason = prompt(`Reason for rejecting "${doc.type}":`);
+    if (reason === null) return;
+
+    setDocumentActionLoadingId(doc.id);
+    try {
+      const response = await adminApiService.updateDocumentStatus(
+        params.userId!,
+        String(doc.id),
+        'rejected',
+        reason.trim() || undefined
+      );
+      if (response.status === 'success') {
+        await refreshUserProfileData();
+      } else {
+        alert(response.message || 'Failed to reject document');
+      }
+    } catch (error: any) {
+      console.error('Error rejecting document:', error);
+      alert(error?.response?.data?.message || 'Error rejecting document');
+    } finally {
+      setDocumentActionLoadingId(null);
+    }
+  };
+
+  const handleCommentDocument = async (doc: any) => {
+    if (!doc?.id) {
+      alert('Document ID not found. Please refresh the page.');
+      return;
+    }
+    const comment = prompt(`Comment for "${doc.type}":`, doc.description || '');
+    if (comment === null || !comment.trim()) return;
+
+    setDocumentActionLoadingId(doc.id);
+    try {
+      const response = await adminApiService.commentDocument(params.userId!, String(doc.id), comment.trim());
+      if (response.status === 'success') {
+        await refreshUserProfileData();
+      } else {
+        alert(response.message || 'Failed to save comment');
+      }
+    } catch (error: any) {
+      console.error('Error saving document comment:', error);
+      alert(error?.response?.data?.message || 'Error saving comment');
+    } finally {
+      setDocumentActionLoadingId(null);
+    }
+  };
+
   // Documents Tab
   const renderDocumentsTab = () => {
     const documents = getUserData('documents');
@@ -3639,15 +3724,27 @@ function UserProfileDetail() {
 
                   {doc.status !== 'verified' && (
                     <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
-                      <button className="flex items-center gap-1 text-green-600 hover:text-green-800 text-sm px-3 py-1.5 bg-green-50 border border-green-200 rounded-md hover:bg-green-100">
+                      <button
+                        onClick={() => handleApproveDocument(doc)}
+                        disabled={documentActionLoadingId === doc.id}
+                        className="flex items-center gap-1 text-green-600 hover:text-green-800 text-sm px-3 py-1.5 bg-green-50 border border-green-200 rounded-md hover:bg-green-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
                         <CheckCircle className="w-4 h-4" />
                         Approve
                       </button>
-                      <button className="flex items-center gap-1 text-red-600 hover:text-red-800 text-sm px-3 py-1.5 bg-red-50 border border-red-200 rounded-md hover:bg-red-100">
+                      <button
+                        onClick={() => handleRejectDocument(doc)}
+                        disabled={documentActionLoadingId === doc.id}
+                        className="flex items-center gap-1 text-red-600 hover:text-red-800 text-sm px-3 py-1.5 bg-red-50 border border-red-200 rounded-md hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
                         <XCircle className="w-4 h-4" />
                         Reject
                       </button>
-                      <button className="flex items-center gap-1 text-gray-600 hover:text-gray-800 text-sm px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-md hover:bg-gray-100">
+                      <button
+                        onClick={() => handleCommentDocument(doc)}
+                        disabled={documentActionLoadingId === doc.id}
+                        className="flex items-center gap-1 text-gray-600 hover:text-gray-800 text-sm px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-md hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
                         <MessageSquare className="w-4 h-4" />
                         Comment
                       </button>

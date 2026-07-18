@@ -22,6 +22,7 @@ const {
   syncAdminRepaymentTransaction
 } = require('../utils/adminRepaymentSync');
 const { v4: uuidv4 } = require('uuid');
+const { markVerified: markEmploymentDocsVerified } = require('../services/employmentVerificationService');
 
 const router = express.Router();
 
@@ -2655,6 +2656,111 @@ router.post('/:userId/documents/upload', authenticateAdmin, denyRecoveryOfficerW
       message: error.message || 'Failed to upload document',
       details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
+  }
+});
+
+// Approve / reject / comment on a loan application document
+router.put('/:userId/documents/:documentId', authenticateAdmin, denyRecoveryOfficerWrite, async (req, res) => {
+  try {
+    await initializeDatabase();
+    const { userId, documentId } = req.params;
+    const { status, rejectionReason, comment } = req.body;
+    const notes = (comment ?? rejectionReason ?? '').toString().trim() || null;
+
+    if (status && !['verified', 'rejected'].includes(status)) {
+      return res.status(400).json({ status: 'error', message: 'Invalid status. Use verified or rejected.' });
+    }
+
+    const docs = await executeQuery(
+      `SELECT id, user_id, document_type, upload_status
+       FROM loan_application_documents
+       WHERE id = ? AND user_id = ?`,
+      [parseInt(documentId, 10), parseInt(userId, 10)]
+    );
+    if (!docs.length) {
+      return res.status(404).json({ status: 'error', message: 'Document not found' });
+    }
+    const doc = docs[0];
+
+    if (status === 'verified') {
+      await executeQuery(
+        `UPDATE loan_application_documents
+         SET upload_status = 'verified',
+             verified_at = NOW(),
+             verification_notes = COALESCE(?, verification_notes)
+         WHERE id = ?`,
+        [notes, doc.id]
+      );
+    } else if (status === 'rejected') {
+      await executeQuery(
+        `UPDATE loan_application_documents
+         SET upload_status = 'rejected',
+             verified_at = NULL,
+             verification_notes = COALESCE(?, verification_notes)
+         WHERE id = ?`,
+        [notes, doc.id]
+      );
+    } else {
+      if (!notes) {
+        return res.status(400).json({ status: 'error', message: 'Comment is required' });
+      }
+      await executeQuery(
+        `UPDATE loan_application_documents SET verification_notes = ? WHERE id = ?`,
+        [notes, doc.id]
+      );
+    }
+
+    // Keep the employment docs-verify record in sync when this document belongs to it
+    if (status) {
+      try {
+        const evRows = await executeQuery(
+          `SELECT id, status, payslip_document_id, company_id_document_id
+           FROM employment_verification_records
+           WHERE payslip_document_id = ? OR company_id_document_id = ?
+           ORDER BY id DESC LIMIT 1`,
+          [doc.id, doc.id]
+        );
+        if (evRows.length) {
+          const evr = evRows[0];
+          if (status === 'verified' && evr.status !== 'verified') {
+            const linkedIds = [evr.payslip_document_id, evr.company_id_document_id].filter(Boolean);
+            const verifiedCountRows = await executeQuery(
+              `SELECT COUNT(*) AS c FROM loan_application_documents
+               WHERE id IN (${linkedIds.map(() => '?').join(',')}) AND upload_status = 'verified'`,
+              linkedIds
+            );
+            if (Number(verifiedCountRows[0]?.c || 0) === linkedIds.length) {
+              await markEmploymentDocsVerified(evr.id, 'manual_docs', {});
+            }
+          } else if (status === 'rejected' && evr.status !== 'verified') {
+            // Rejected doc must be re-uploaded — reopen the record and detach the document
+            const clearColumn =
+              evr.payslip_document_id === doc.id ? 'payslip_document_id' : 'company_id_document_id';
+            await executeQuery(
+              `UPDATE employment_verification_records
+               SET status = 'pending', ${clearColumn} = NULL, updated_at = NOW()
+               WHERE id = ?`,
+              [evr.id]
+            );
+          }
+        }
+      } catch (syncErr) {
+        console.error('Employment verification sync after document review failed:', syncErr.message);
+      }
+    }
+
+    res.json({
+      status: 'success',
+      message:
+        status === 'verified'
+          ? 'Document approved successfully'
+          : status === 'rejected'
+            ? 'Document rejected'
+            : 'Comment saved'
+    });
+  } catch (error) {
+    console.error('Update document status error:', error);
+    res.status(500).json({ status: 'error', message: 'Failed to update document status' });
   }
 });
 

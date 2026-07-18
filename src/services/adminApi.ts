@@ -461,6 +461,10 @@ class AdminApiService {
     return this.request('PUT', `/user-profile/${userId}/documents/${documentId}`, { status, rejectionReason });
   }
 
+  async commentDocument(userId: string, documentId: string, comment: string): Promise<ApiResponse<any>> {
+    return this.request('PUT', `/user-profile/${userId}/documents/${documentId}`, { comment });
+  }
+
   // Bank Details Management
   async getUserBankDetails(userId: string): Promise<ApiResponse<any>> {
     return this.request('GET', `/user-profile/${userId}/bank-details`);
