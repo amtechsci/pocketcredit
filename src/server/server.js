@@ -78,6 +78,7 @@ const adminLateFeesRoutes = require('./routes/adminLateFees');
 const adminBankStatementRoutes = require('./routes/adminBankStatement');
 const adminTeamRoutes = require('./routes/adminTeam');
 const adminPartnersRoutes = require('./routes/adminPartners');
+const adminApiClientsRoutes = require('./routes/adminApiClients');
 const partnersPublicRoutes = require('./routes/partnersPublic');
 const activityLogsRoutes = require('./routes/activityLogsSimple');
 const contactRoutes = require('./routes/contact');
@@ -288,6 +289,7 @@ app.use('/api/admin/late-fees', adminLateFeesRoutes);
 app.use('/api/admin/bank-statement', adminBankStatementRoutes);
 app.use('/api/admin/team', adminTeamRoutes);
 app.use('/api/admin/partners', adminPartnersRoutes);
+app.use('/api/admin/api-clients', adminApiClientsRoutes);
 app.use('/api/partners-display', partnersPublicRoutes);
 app.use('/api/admin/activities', activityLogsRoutes);
 app.use('/api/admin/search', searchRoutes);
@@ -473,10 +475,10 @@ app.use('/api/policies', policiesRoutes);
 // Partner API routes (separate from main API)
 const partnerApiRoutes = require('./routes/partnerApi');
 const partnerDashboardRoutes = require('./routes/partnerDashboard');
-const partnerBankStatementRoutes = require('./routes/partnerBankStatement');
+const bankApiRoutes = require('./routes/bankApi');
 app.use('/api/v1/partner', partnerApiRoutes);
-app.use('/api/v1/partner/bank-statement', partnerBankStatementRoutes);
 app.use('/api/v1/partner/dashboard', partnerDashboardRoutes);
+app.use('/api/v1/bank-api', bankApiRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

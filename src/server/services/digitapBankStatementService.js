@@ -140,6 +140,13 @@ function generatePartnerClientRefNum(partnerId) {
   return `PK${paddedPartnerId}${timestamp}`;
 }
 
+/** B2B bank API client Digitap reference: AK{apiClientId}{timestamp} */
+function generateApiClientRefNum(apiClientId) {
+  const timestamp = Date.now();
+  const paddedId = String(apiClientId || 0).padStart(6, '0');
+  return `AK${paddedId}${timestamp}`;
+}
+
 /**
  * Generate URL for Bank Statement Collection
  * This creates a secure link where customers can:
@@ -1454,6 +1461,7 @@ module.exports = {
   initiateBankStatementCollection,
   generateClientRefNum,
   generatePartnerClientRefNum,
+  generateApiClientRefNum,
   getBankDataCallbackUrls,
   startUploadAPI,
   uploadStatementAPI,

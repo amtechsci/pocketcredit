@@ -21,6 +21,10 @@ const {
   notifyPartnerCallback,
   PARTNER_TABLE
 } = require('../services/partnerBankStatementService');
+const {
+  notifyApiClientCallback,
+  REQUESTS_TABLE: API_BANK_REQUESTS_TABLE
+} = require('../services/apiClientBankStatementService');
 
 /**
  * Helper function to extract bank details from Digitap report data
@@ -1230,6 +1234,15 @@ async function handleBankDataWebhook(req, res) {
     );
 
     if (statements.length === 0) {
+      statementSource = 'api_client';
+      statements = await executeQuery(
+        `SELECT id, api_client_id, client_ref_num, txn_id, callback_url, external_ref
+         FROM ${API_BANK_REQUESTS_TABLE} WHERE request_id = ?`,
+        [actualRequestId]
+      );
+    }
+
+    if (statements.length === 0) {
       statementSource = 'partner';
       statements = await executeQuery(
         `SELECT id, partner_id, client_ref_num, txn_id, callback_url, partner_ref
@@ -1248,7 +1261,11 @@ async function handleBankDataWebhook(req, res) {
 
     const statement = statements[0];
     const updateTable =
-      statementSource === 'user' ? 'user_bank_statements' : PARTNER_TABLE;
+      statementSource === 'user'
+        ? 'user_bank_statements'
+        : statementSource === 'api_client'
+          ? API_BANK_REQUESTS_TABLE
+          : PARTNER_TABLE;
 
     // Check if all transactions are completed
     let allCompleted = false;
@@ -1300,6 +1317,17 @@ async function handleBankDataWebhook(req, res) {
     console.log(
       `✅ Bank statement updated (${statementSource}): status = ${newStatus}, allCompleted = ${allCompleted}`
     );
+
+    if (statementSource === 'api_client' && statement.callback_url) {
+      const callbackEvent = allCompleted
+        ? 'bank_statement.completed'
+        : 'bank_statement.in_progress';
+      notifyApiClientCallback(statement.api_client_id, statement, callbackEvent, newStatus).catch(
+        (callbackErr) => {
+          console.error('Bank API client callback failed:', callbackErr.message);
+        }
+      );
+    }
 
     if (statementSource === 'partner' && statement.callback_url) {
       const callbackEvent = allCompleted

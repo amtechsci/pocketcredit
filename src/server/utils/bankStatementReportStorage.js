@@ -4,18 +4,21 @@ const { retrieveBankStatementReport } = require('../services/digitapBankStatemen
 const ALLOWED_TABLES = new Set([
   'user_bank_statements',
   'digitap_bank_statements',
+  'api_bank_statement_requests',
   'partner_bank_statement_requests'
 ]);
 
 const ALLOWED_WHERE_COLUMNS = {
   user_bank_statements: new Set(['id', 'request_id', 'client_ref_num']),
   digitap_bank_statements: new Set(['id', 'client_ref_num']),
+  api_bank_statement_requests: new Set(['id', 'request_id', 'client_ref_num']),
   partner_bank_statement_requests: new Set(['id', 'request_id', 'client_ref_num'])
 };
 
 const ALLOWED_EXTRA_SET_COLUMNS = {
   user_bank_statements: new Set(['verification_status']),
   digitap_bank_statements: new Set([]),
+  api_bank_statement_requests: new Set([]),
   partner_bank_statement_requests: new Set([])
 };
 
