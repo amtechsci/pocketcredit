@@ -131,6 +131,16 @@ function generateClientRefNum(userId, applicationId) {
 }
 
 /**
+ * Unique client reference for partner (external) bank-statement requests.
+ * Format: PK{partnerId}{timestamp}
+ */
+function generatePartnerClientRefNum(partnerId) {
+  const timestamp = Date.now();
+  const paddedPartnerId = String(partnerId || 0).padStart(6, '0');
+  return `PK${paddedPartnerId}${timestamp}`;
+}
+
+/**
  * Generate URL for Bank Statement Collection
  * This creates a secure link where customers can:
  * - Login to Net Banking
@@ -1443,6 +1453,7 @@ module.exports = {
   retrieveBankStatementReport,
   initiateBankStatementCollection,
   generateClientRefNum,
+  generatePartnerClientRefNum,
   getBankDataCallbackUrls,
   startUploadAPI,
   uploadStatementAPI,

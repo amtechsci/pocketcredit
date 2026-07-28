@@ -17,6 +17,10 @@ const {
 const { saveUserInfoFromBankAPI } = require('../services/userInfoService');
 const { fetchAndSaveBankStatementReports } = require('../utils/bankStatementReportStorage');
 const { fetchAadhaarLinkedMobile, normalizeIndianMobile } = require('../utils/resolveAadhaarLinkedMobile');
+const {
+  notifyPartnerCallback,
+  PARTNER_TABLE
+} = require('../services/partnerBankStatementService');
 
 /**
  * Helper function to extract bank details from Digitap report data
@@ -1218,11 +1222,21 @@ async function handleBankDataWebhook(req, res) {
       });
     }
 
-    // Find the bank statement by request_id
-    const statements = await executeQuery(
+    // Find user or partner bank statement by request_id
+    let statementSource = 'user';
+    let statements = await executeQuery(
       'SELECT id, user_id, client_ref_num, txn_id FROM user_bank_statements WHERE request_id = ?',
       [actualRequestId]
     );
+
+    if (statements.length === 0) {
+      statementSource = 'partner';
+      statements = await executeQuery(
+        `SELECT id, partner_id, client_ref_num, txn_id, callback_url, partner_ref
+         FROM ${PARTNER_TABLE} WHERE request_id = ?`,
+        [actualRequestId]
+      );
+    }
 
     if (statements.length === 0) {
       console.warn('⚠️  No bank statement found for request_id:', actualRequestId);
@@ -1233,6 +1247,8 @@ async function handleBankDataWebhook(req, res) {
     }
 
     const statement = statements[0];
+    const updateTable =
+      statementSource === 'user' ? 'user_bank_statements' : PARTNER_TABLE;
 
     // Check if all transactions are completed
     let allCompleted = false;
@@ -1275,13 +1291,26 @@ async function handleBankDataWebhook(req, res) {
     updateFields.push('updated_at = NOW()');
 
     await executeQuery(
-      `UPDATE user_bank_statements 
-       SET ${updateFields.join(', ')} 
+      `UPDATE ${updateTable}
+       SET ${updateFields.join(', ')}
        WHERE request_id = ?`,
       [...updateValues, actualRequestId]
     );
 
-    console.log(`✅ Bank statement updated: status = ${newStatus}, allCompleted = ${allCompleted}`);
+    console.log(
+      `✅ Bank statement updated (${statementSource}): status = ${newStatus}, allCompleted = ${allCompleted}`
+    );
+
+    if (statementSource === 'partner' && statement.callback_url) {
+      const callbackEvent = allCompleted
+        ? 'bank_statement.completed'
+        : 'bank_statement.in_progress';
+      notifyPartnerCallback(statement.partner_id, statement, callbackEvent, newStatus).catch(
+        (callbackErr) => {
+          console.error('Partner callback failed:', callbackErr.message);
+        }
+      );
+    }
 
     // If completed, automatically fetch and save the report
     if (allCompleted) {
@@ -1290,28 +1319,37 @@ async function handleBankDataWebhook(req, res) {
       try {
         const clientRefNum = statement.client_ref_num || actualClientRefNum;
         const txnId = actualTxnId || statement.txn_id;
+        const reportTable = updateTable;
 
         // Priority: Use txn_id if available, otherwise use client_ref_num
         if (!txnId && !clientRefNum) {
           console.warn('⚠️  No txn_id or client_ref_num found, cannot fetch report');
         } else {
+          const saveReportForWebhook = async () => {
+            return fetchAndSaveBankStatementReports({
+              executeQuery,
+              clientRefNum: txnId ? null : clientRefNum,
+              txnId: txnId || null,
+              table: reportTable,
+              whereColumn: 'request_id',
+              whereValue: actualRequestId
+            });
+          };
+
           // If we have "ReportGenerated" code, report is definitely ready - fetch directly
           if (actualCode === 'ReportGenerated') {
             console.log(`📥 ReportGenerated code detected - fetching report using ${txnId ? `txn_id=${txnId}` : `client_ref_num=${clientRefNum}`}`);
 
-            const saveResult = await fetchAndSaveBankStatementReports({
-              executeQuery,
-              clientRefNum: txnId ? null : clientRefNum,
-              txnId: txnId || null,
-              whereColumn: 'request_id',
-              whereValue: actualRequestId
-            });
+            const saveResult = await saveReportForWebhook();
 
             console.log('📥 Report fetch result:', saveResult.success ? 'Success' : saveResult.error);
 
-            if (saveResult.success) {
+            if (saveResult.success && statementSource === 'user') {
               try {
-                const bankDetailsResult = await extractAndSaveBankDetails(saveResult.report, statement.user_id);
+                const bankDetailsResult = await extractAndSaveBankDetails(
+                  saveResult.report,
+                  statement.user_id
+                );
                 if (bankDetailsResult.success) {
                   console.log('✅ Bank details extracted and saved:', bankDetailsResult.data);
                 } else {
@@ -1320,33 +1358,33 @@ async function handleBankDataWebhook(req, res) {
               } catch (bankDetailsError) {
                 console.error('❌ Error extracting bank details:', bankDetailsError);
               }
-            } else {
+            } else if (!saveResult.success) {
               console.log('⚠️  Report fetch failed:', saveResult.error || 'Unknown error');
             }
           } else {
             // For other completion formats, check status first
-            await new Promise(resolve => setTimeout(resolve, 3000));
+            await new Promise((resolve) => setTimeout(resolve, 3000));
 
             const statusResult = await checkBankStatementStatus(actualRequestId);
 
             console.log('📊 Status check result:', JSON.stringify(statusResult, null, 2));
 
-            if (statusResult.success && (statusResult.data.overall_status === 'completed' || statusResult.data.is_complete)) {
+            if (
+              statusResult.success &&
+              (statusResult.data.overall_status === 'completed' || statusResult.data.is_complete)
+            ) {
               console.log(`📥 Fetching report using ${txnId ? `txn_id=${txnId}` : `client_ref_num=${clientRefNum}`}`);
 
-              const saveResult = await fetchAndSaveBankStatementReports({
-                executeQuery,
-                clientRefNum: txnId ? null : clientRefNum,
-                txnId: txnId || null,
-                whereColumn: 'request_id',
-                whereValue: actualRequestId
-              });
+              const saveResult = await saveReportForWebhook();
 
               console.log('📥 Report fetch result:', saveResult.success ? 'Success' : saveResult.error);
 
-              if (saveResult.success) {
+              if (saveResult.success && statementSource === 'user') {
                 try {
-                  const bankDetailsResult = await extractAndSaveBankDetails(saveResult.report, statement.user_id);
+                  const bankDetailsResult = await extractAndSaveBankDetails(
+                    saveResult.report,
+                    statement.user_id
+                  );
                   if (bankDetailsResult.success) {
                     console.log('✅ Bank details extracted and saved:', bankDetailsResult.data);
                   } else {
@@ -1355,11 +1393,14 @@ async function handleBankDataWebhook(req, res) {
                 } catch (bankDetailsError) {
                   console.error('❌ Error extracting bank details:', bankDetailsError);
                 }
-              } else {
+              } else if (!saveResult.success) {
                 console.log('⚠️  Report not ready yet or fetch failed:', saveResult.error || 'Unknown error');
               }
             } else {
-              console.log('⚠️  Status check indicates report not ready yet. Status:', statusResult.data?.overall_status);
+              console.log(
+                '⚠️  Status check indicates report not ready yet. Status:',
+                statusResult.data?.overall_status
+              );
             }
           }
         }

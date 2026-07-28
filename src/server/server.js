@@ -473,7 +473,9 @@ app.use('/api/policies', policiesRoutes);
 // Partner API routes (separate from main API)
 const partnerApiRoutes = require('./routes/partnerApi');
 const partnerDashboardRoutes = require('./routes/partnerDashboard');
+const partnerBankStatementRoutes = require('./routes/partnerBankStatement');
 app.use('/api/v1/partner', partnerApiRoutes);
+app.use('/api/v1/partner/bank-statement', partnerBankStatementRoutes);
 app.use('/api/v1/partner/dashboard', partnerDashboardRoutes);
 
 // Health check endpoint
