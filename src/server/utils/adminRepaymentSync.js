@@ -244,6 +244,35 @@ function emiNumberFromDescription(description) {
   return null;
 }
 
+/** Admin order_id embeds payment type, e.g. ADMIN_7921_emi_2nd_T123 → 2. */
+function emiNumberFromAdminOrderId(orderId) {
+  return emiNumberFromDescription(orderId);
+}
+
+/**
+ * Sequential EMI index for a newly inserted admin emi_payment (1st tx → EMI 1, 2nd → EMI 2).
+ * Matches backfillAdminRepaymentRecords ordering so payment_orders get distinct emi_1st / emi_2nd.
+ */
+async function resolveAdminEmiNumberForNewTransaction(executeQuery, loanId, transactionId, emiScheduleRaw, description) {
+  const fromDesc = emiNumberFromDescription(description);
+  if (fromDesc != null) return fromDesc;
+
+  const rows = await executeQuery(
+    `SELECT COUNT(*) AS c FROM transactions
+     WHERE loan_application_id = ?
+       AND transaction_type = 'emi_payment'
+       AND status = 'completed'
+       AND id < ?`,
+    [loanId, transactionId]
+  );
+  let seq = (parseInt(rows[0]?.c, 10) || 0) + 1;
+  const schedule = parseEmiSchedule(emiScheduleRaw);
+  if (schedule && schedule.length > 0) {
+    seq = Math.min(seq, schedule.length);
+  }
+  return seq;
+}
+
 /**
  * True for auto-generated gateway ledger rows (Cashfree hosted checkout / recovery links).
  * These are ALREADY fully applied by the gateway flow (emi_schedule + loan_payments +
@@ -700,6 +729,8 @@ module.exports = {
   ADMIN_REPAYMENT_TX_TYPES,
   normalizeDateOnly,
   getFirstUnpaidEmiNumber,
+  emiNumberFromAdminOrderId,
+  resolveAdminEmiNumberForNewTransaction,
   markAdminEmiPaidInSchedule,
   rebuildEmiScheduleFromAdminEmiPayments,
   resolvePaymentTypeForAdminTransaction,

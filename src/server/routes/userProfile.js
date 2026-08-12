@@ -17,8 +17,8 @@ const {
   evaluateLoanClearanceEligibility
 } = require('../utils/loanClearance');
 const {
-  getFirstUnpaidEmiNumber,
   markAdminEmiPaidInSchedule,
+  resolveAdminEmiNumberForNewTransaction,
   syncAdminRepaymentTransaction
 } = require('../utils/adminRepaymentSync');
 const { v4: uuidv4 } = require('uuid');
@@ -3902,7 +3902,7 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
       }
     }
 
-    // Handle emi_payment — always apply to the first unpaid EMI (sequential)
+    // Handle emi_payment — apply sequentially (1st payment → EMI 1, 2nd → EMI 2, …)
     if (txType === 'emi_payment' && loan_application_id) {
       const loanIdInt = parseInt(loan_application_id);
       const userIdInt = parseInt(userId);
@@ -3940,7 +3940,13 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
             }
           }
 
-          const emiNumber = getFirstUnpaidEmiNumber(emiSchedule);
+          const emiNumber = await resolveAdminEmiNumberForNewTransaction(
+            executeQuery,
+            loanIdInt,
+            transactionId,
+            emiSchedule,
+            description
+          );
           const paymentAmount = parseFloat(amount) || 0;
           const paidDate = txDate || new Date().toISOString().split('T')[0];
 

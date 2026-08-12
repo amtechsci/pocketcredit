@@ -10,7 +10,7 @@ const {
     getTodayString
 } = require('../utils/loanCalculations');
 const loanCalculationsRoute = require('./loanCalculations');
-const { backfillAdminRepaymentRecords } = require('../utils/adminRepaymentSync');
+const { backfillAdminRepaymentRecords, emiNumberFromAdminOrderId } = require('../utils/adminRepaymentSync');
 
 const router = express.Router();
 
@@ -710,6 +710,7 @@ const resolveBsDisbursalProcessingFeePercent = (row, resolvedDisbursalFee) => {
 /**
  * BS Repayment fallback when transactions.reference_number is unavailable:
  * prefer trailing numeric id from strings like ADMIN_262_emi_2nd_1774374857752.
+ * Primary match in the report SQL is po.order_id suffix _T{transactionId}.
  */
 const extractBsRepaymentReferenceNumber = (raw) => {
     if (raw == null || raw === '') return '';
@@ -747,6 +748,62 @@ const emiNumberFromPaymentType = (pt) => {
     if (pt === 'emi_3rd') return 3;
     if (pt === 'emi_4th') return 4;
     return null;
+};
+
+const mapEmiNumberToClosureType = (emiNum) => {
+    if (emiNum === 1) return 'emi1';
+    if (emiNum === 2) return 'emi2';
+    if (emiNum === 3) return 'emi3';
+    if (emiNum === 4) return 'emi4';
+    return 'part';
+};
+
+/** When payment_orders duplicate emi_1st, assign EMI # by payment chronology per loan. */
+const buildBsRepaymentEmiNumberMap = (rows) => {
+    const map = new Map();
+    const byLoan = new Map();
+
+    for (const row of rows || []) {
+        const pt = String(row.payment_type || '');
+        const orderId = String(row.order_id || '');
+        if (!pt.startsWith('emi_') && !/_emi_\d+(?:st|nd|rd|th)/i.test(orderId)) continue;
+        if (!byLoan.has(row.lid)) byLoan.set(row.lid, []);
+        byLoan.get(row.lid).push(row);
+    }
+
+    for (const [lid, loanRows] of byLoan) {
+        loanRows.sort((a, b) => {
+            const ta = new Date(a.transaction_date).getTime();
+            const tb = new Date(b.transaction_date).getTime();
+            if (ta !== tb) return ta - tb;
+            return (parseInt(a.po_id, 10) || 0) - (parseInt(b.po_id, 10) || 0);
+        });
+
+        const resolved = loanRows.map((r) => ({
+            row: r,
+            emiNum: emiNumberFromAdminOrderId(r.order_id) ?? emiNumberFromPaymentType(r.payment_type)
+        }));
+
+        const used = new Set();
+        let needsSequential = false;
+        for (const item of resolved) {
+            if (item.emiNum == null || used.has(item.emiNum)) {
+                needsSequential = true;
+                break;
+            }
+            used.add(item.emiNum);
+        }
+
+        if (needsSequential) {
+            loanRows.forEach((r, idx) => map.set(`${lid}:${r.po_id}`, idx + 1));
+        } else {
+            for (const item of resolved) {
+                map.set(`${lid}:${item.row.po_id}`, item.emiNum);
+            }
+        }
+    }
+
+    return map;
 };
 
 /** Calendar days after due date until repayment (0 if same day or early). Aligns with late-fee “past due” rather than tenure from disbursement. */
@@ -1581,6 +1638,8 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 la.processing_fee_percent as pro_fee_per, 
                 COALESCE(la.interest_percent_per_day * 100, 0) as interest_percentage,
                 COALESCE(lp.transaction_id, po.order_id) as transaction_number,
+                po.id as po_id,
+                po.order_id as order_id,
                 (
                     SELECT t.reference_number
                     FROM transactions t
@@ -1588,15 +1647,29 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                       AND t.transaction_type NOT IN ('loan_disbursement')
                       AND t.transaction_type NOT LIKE 'loan_extension%'
                       AND (
-                          t.description LIKE CONCAT('%Order: ', po.order_id, '%')
+                          (po.order_id REGEXP '_T[0-9]+$'
+                           AND t.id = CAST(SUBSTRING_INDEX(po.order_id, '_T', -1) AS UNSIGNED))
+                          OR t.description LIKE CONCAT('%Order: ', po.order_id, '%')
                           OR t.reference_number = po.order_id
                           OR (
                               t.transaction_type IN ('emi_payment', 'full_payment', 'settlement', 'part_payment')
                               AND DATE(t.transaction_date) = DATE(COALESCE(lp.payment_date, po.updated_at))
                               AND ABS(t.amount - COALESCE(lp.amount, po.amount)) < 0.02
+                              AND (
+                                  po.payment_type NOT IN ('emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th')
+                                  OR t.description LIKE CONCAT('%', po.payment_type, '%')
+                              )
                           )
                       )
-                    ORDER BY t.id DESC
+                    ORDER BY
+                      CASE
+                        WHEN po.order_id REGEXP '_T[0-9]+$'
+                             AND t.id = CAST(SUBSTRING_INDEX(po.order_id, '_T', -1) AS UNSIGNED) THEN 0
+                        WHEN t.description LIKE CONCAT('%Order: ', po.order_id, '%') THEN 1
+                        WHEN t.reference_number = po.order_id THEN 2
+                        ELSE 3
+                      END,
+                      t.id DESC
                     LIMIT 1
                 ) AS payment_reference_number,
                 COALESCE(lp.payment_date, po.updated_at) as transaction_date, 
@@ -1638,6 +1711,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                     l.lid, l.processed_amount, l.p_fee, l.service_charge, l.penality_charge,
                     la.amount AS principal_amount, la.amount AS amount, la.processing_fees, la.pro_fee_per, la.interest_percentage,
                     td.transaction_number, td.transaction_date, td.transaction_flow AS payment_type, td.transaction_amount,
+                    NULL as po_id, NULL as order_id,
                     l.processed_date AS loan_start_date,
                     NULL as fees_breakdown, NULL as processed_p_fee, NULL as processed_post_service_fee, NULL as processed_gst,
                     NULL as plan_snapshot, NULL as emi_schedule, NULL as interest_percent_per_day,
@@ -1694,11 +1768,20 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
             }
         }
 
+        const bsRepaymentEmiMap = buildBsRepaymentEmiNumberMap(rows);
+
         for (const row of rows) {
             // Voucher No: PLL + loan_application.id (unique)
             const voucher_no = 'PLL' + row.lid;
             const paymentType = row.payment_type || '';
-            const loan_closure_type = mapPaymentTypeToClosureType(paymentType);
+            const emiNum =
+                bsRepaymentEmiMap.get(`${row.lid}:${row.po_id}`) ??
+                emiNumberFromAdminOrderId(row.order_id) ??
+                emiNumberFromPaymentType(paymentType);
+            const loan_closure_type =
+                emiNum != null
+                    ? mapEmiNumberToClosureType(emiNum)
+                    : mapPaymentTypeToClosureType(paymentType);
             const isPreclosePayment =
                 paymentType === 'pre-close' ||
                 paymentType === 'preclose' ||
@@ -1735,7 +1818,6 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
             const repayment_amt = parseFloat(row.transaction_amount) || 0;
             const extra_amount = repayment_amt - sanctioned_amount;
 
-            const emiNum = emiNumberFromPaymentType(paymentType);
             if (emiNum != null) {
                 const bdMap = emiBreakdownByLoan.get(row.lid);
                 const bd = bdMap?.get(emiNum);
