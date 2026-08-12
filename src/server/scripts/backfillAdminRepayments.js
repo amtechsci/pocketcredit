@@ -11,8 +11,12 @@
  *   node src/server/scripts/backfillAdminRepayments.js --repair-gateway-ledger-only
  *
  * Optional scope (only for testing a few loans):
- *   node src/server/scripts/backfillAdminRepayments.js --loan-id=4769
- *   node src/server/scripts/backfillAdminRepayments.js --loan-ids=4769,2739
+ *   node server/scripts/backfillAdminRepayments.js --loan-id=2700
+ *   node server/scripts/backfillAdminRepayments.js --loan-id=PLL2700
+ *   node server/scripts/backfillAdminRepayments.js --loan-ids=4769,2739
+ *
+ * Run from project root (/var/www/pocket/src):
+ *   node server/scripts/backfillAdminRepayments.js --loan-id=PLL2700
  */
 
 const path = require('path');
@@ -76,9 +80,9 @@ function parseArgs(argv) {
     } else if (arg === '--repair-gateway-ledger-only') {
       repairGatewayLedgerOnly = true;
     } else if (arg.startsWith('--loan-id=')) {
-      loanId = parseInt(arg.split('=')[1], 10);
+      loanId = parseInt(arg.split('=')[1].replace(/^PLL/i, ''), 10);
     } else if (arg.startsWith('--loan_id=')) {
-      loanId = parseInt(arg.split('=')[1], 10);
+      loanId = parseInt(arg.split('=')[1].replace(/^PLL/i, ''), 10);
     } else if (arg.startsWith('--loan-ids=')) {
       loanIds = arg
         .split('=')[1]
