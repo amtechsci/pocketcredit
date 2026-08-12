@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS api_clients (
   email varchar(255) DEFAULT NULL,
   public_key_path varchar(500) DEFAULT NULL,
   allowed_ips text DEFAULT NULL,
+  webhook_signing_secret varchar(128) DEFAULT NULL COMMENT 'Per-client callback HMAC secret',
   is_active tinyint(1) NOT NULL DEFAULT 1,
   created_at timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

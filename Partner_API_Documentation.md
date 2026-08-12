@@ -5,10 +5,11 @@
 2. [Base URL](#base-url)
 3. [Authentication](#authentication)
 4. [API Endpoints](#api-endpoints)
-5. [Error Codes](#error-codes)
-6. [Request/Response Examples](#requestresponse-examples)
-7. [Encryption (Optional)](#encryption-optional)
-8. [Testing Guide](#testing-guide)
+5. [Bank API clients (AA / bank statement)](#bank-api-clients-aa--bank-statement)
+6. [Error Codes](#error-codes)
+7. [Request/Response Examples](#requestresponse-examples)
+8. [Encryption (Optional)](#encryption-optional)
+9. [Testing Guide](#testing-guide)
 
 ---
 
@@ -22,6 +23,7 @@ The Partner API allows lead sourcing partners to:
 
 ### Key Features
 - **Dedupe Checking**: Check if a lead (mobile number/PAN) already exists
+- **Bank statement / Account Aggregator (B2B clients)**: Separate from lead partners — see [Bank_API_Client_Integration.md](./Bank_API_Client_Integration.md)
 - **UTM Tracking**: Automatic UTM link generation for lead attribution
 - **Dashboard**: View leads, statistics, and payout information
 - **Encryption**: Optional RSA-OAEP + AES-256-GCM encryption support
@@ -367,6 +369,17 @@ GET /api/v1/partner/dashboard/lead/1
     "message": "Lead not found"
 }
 ```
+
+---
+
+## Bank API clients (AA / bank statement)
+
+B2B clients that offer Account Aggregator / bank verification to **their** users use a **separate** API and credentials (not lead partners):
+
+**[Bank_API_Client_Integration.md](./Bank_API_Client_Integration.md)**
+
+Base path: `https://pocketcredit.in/api/v1/bank-api`  
+Admin: `POST /api/admin/api-clients`
 
 ---
 

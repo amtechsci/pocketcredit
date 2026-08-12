@@ -112,7 +112,7 @@ router.put('/user-config', async (req, res) => {
         });
       }
     }
-    
+
     res.json({
       success: true,
       message: 'User configurations updated successfully',

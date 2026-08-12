@@ -8,8 +8,7 @@ const {
   checkBankStatementStatus
 } = require('./digitapBankStatementService');
 const { fetchAndSaveBankStatementReports } = require('../utils/bankStatementReportStorage');
-const { findApiClientById } = require('../models/apiClient');
-const { BANK_API_JWT_SECRET } = require('../middleware/apiClientAuth');
+const { getBankApiJwtSecret } = require('../utils/bankApiConfig');
 
 const REQUESTS_TABLE = 'api_bank_statement_requests';
 const VALID_DESTINATIONS = new Set(['accountaggregator', 'netbanking', 'statementupload']);
@@ -345,8 +344,13 @@ async function getReportForApiClient(apiClient, { requestId, externalRef, includ
 async function notifyApiClientCallback(apiClientId, requestRow, event, status) {
   if (!requestRow.callback_url) return;
 
-  const apiClient = await findApiClientById(apiClientId);
-  if (!apiClient) return;
+  const clientRows = await executeQuery(
+    'SELECT client_uuid, webhook_signing_secret FROM api_clients WHERE id = ?',
+    [apiClientId]
+  );
+  if (!clientRows[0]) return;
+
+  const { client_uuid: clientUuid, webhook_signing_secret: clientWebhookSecret } = clientRows[0];
 
   const payload = {
     event,
@@ -357,11 +361,10 @@ async function notifyApiClientCallback(apiClientId, requestRow, event, status) {
   };
 
   const body = JSON.stringify(payload);
-  const signingSecret = BANK_API_JWT_SECRET;
-  const signature = crypto
-    .createHmac('sha256', `${signingSecret}:${apiClient.client_uuid}`)
-    .update(body)
-    .digest('hex');
+  const hmacKey = clientWebhookSecret
+    ? `${clientWebhookSecret}:${clientUuid}`
+    : `${getBankApiJwtSecret()}:${clientUuid}`;
+  const signature = crypto.createHmac('sha256', hmacKey).update(body).digest('hex');
 
   await axios.post(requestRow.callback_url, payload, {
     headers: {

@@ -71,7 +71,8 @@ router.post('/', authenticateAdmin, requireSuperadmin, async (req, res) => {
     res.status(201).json({
       status: 'success',
       data: created,
-      message: 'Save client_secret now; it cannot be retrieved later.'
+      message:
+        'Save client_secret and webhook_signing_secret now; they cannot be retrieved later.'
     });
   } catch (error) {
     console.error('Admin create API client error:', error);

@@ -1,9 +1,9 @@
 const jwt = require('jsonwebtoken');
 const { findApiClientByUuid, verifyApiClientCredentials, findApiClientByClientId } = require('../models/apiClient');
 const { getIpAddress } = require('../utils/loginDataParser');
+const { getBankApiJwtSecret } = require('../utils/bankApiConfig');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'pocket-credit-secret-key-2025';
-const BANK_API_JWT_SECRET = process.env.BANK_API_JWT_SECRET || process.env.API_CLIENT_JWT_SECRET || JWT_SECRET;
 
 function checkApiClientIpAllowed(req, apiClient) {
   const origin = req.headers.origin || req.headers.referer;
@@ -79,7 +79,7 @@ const authenticateApiClientToken = async (req, res, next) => {
     const token = authHeader.split(' ')[1];
     let decoded;
     try {
-      decoded = jwt.verify(token, BANK_API_JWT_SECRET, { clockTolerance: 60 });
+      decoded = jwt.verify(token, getBankApiJwtSecret(), { clockTolerance: 60 });
     } catch (error) {
       const code = error.name === 'TokenExpiredError' ? 4217 : 4215;
       return res.status(401).json({
@@ -116,7 +116,7 @@ const generateApiClientAccessToken = (apiClient) => {
     aud: apiClient.client_uuid,
     iss: 'pocketcredit-bank-api'
   };
-  return jwt.sign(payload, BANK_API_JWT_SECRET);
+  return jwt.sign(payload, getBankApiJwtSecret());
 };
 
 const generateApiClientRefreshToken = (apiClient) => {
@@ -129,11 +129,11 @@ const generateApiClientRefreshToken = (apiClient) => {
     aud: apiClient.client_uuid,
     iss: 'pocketcredit-bank-api'
   };
-  return jwt.sign(payload, BANK_API_JWT_SECRET);
+  return jwt.sign(payload, getBankApiJwtSecret());
 };
 
 const verifyApiClientRefreshToken = (token) => {
-  const decoded = jwt.verify(token, BANK_API_JWT_SECRET, { clockTolerance: 60 });
+  const decoded = jwt.verify(token, getBankApiJwtSecret(), { clockTolerance: 60 });
   if (decoded.type !== 'bank_api_refresh_token') {
     throw new Error('Invalid token type');
   }
@@ -145,6 +145,5 @@ module.exports = {
   authenticateApiClientToken,
   generateApiClientAccessToken,
   generateApiClientRefreshToken,
-  verifyApiClientRefreshToken,
-  BANK_API_JWT_SECRET
+  verifyApiClientRefreshToken
 };

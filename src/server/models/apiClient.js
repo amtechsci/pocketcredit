@@ -1,4 +1,5 @@
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const { executeQuery, initializeDatabase } = require('../config/database');
 
 const findApiClientByClientId = async (clientId) => {
@@ -57,11 +58,21 @@ const createApiClient = async (data) => {
   } = data;
 
   const hashedSecret = await bcrypt.hash(client_secret, 10);
+  const webhookSigningSecret = crypto.randomBytes(32).toString('hex');
   const result = await executeQuery(
     `INSERT INTO api_clients
-     (client_uuid, client_id, client_secret, name, email, public_key_path, allowed_ips, is_active, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())`,
-    [client_uuid, client_id, hashedSecret, name, email, public_key_path, allowed_ips]
+     (client_uuid, client_id, client_secret, name, email, public_key_path, allowed_ips, webhook_signing_secret, is_active, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())`,
+    [
+      client_uuid,
+      client_id,
+      hashedSecret,
+      name,
+      email,
+      public_key_path,
+      allowed_ips,
+      webhookSigningSecret
+    ]
   );
 
   return {
@@ -70,7 +81,8 @@ const createApiClient = async (data) => {
     client_id,
     name,
     email,
-    is_active: true
+    is_active: true,
+    webhook_signing_secret: webhookSigningSecret
   };
 };
 
