@@ -309,6 +309,28 @@ async function findPaymentOrderByTransactionId(executeQuery, loanId, transaction
   return rows[0] || null;
 }
 
+/** LOAN_* Cashfree order already on file — do not create a second ADMIN_* payment_order. */
+async function findExistingGatewayPaymentOrder(executeQuery, loanId, transaction) {
+  const desc = String(transaction?.description || '');
+  const fromDesc = desc.match(/Order:\s*(LOAN_[^\s,]+)/i);
+  if (fromDesc) {
+    const rows = await executeQuery(
+      `SELECT id, order_id FROM payment_orders WHERE loan_id = ? AND order_id = ? LIMIT 1`,
+      [loanId, fromDesc[1].trim()]
+    );
+    if (rows[0]) return rows[0];
+  }
+  const ref = String(transaction?.reference_number || '').trim();
+  if (ref.startsWith('LOAN_')) {
+    const rows = await executeQuery(
+      `SELECT id, order_id FROM payment_orders WHERE loan_id = ? AND order_id = ? LIMIT 1`,
+      [loanId, ref]
+    );
+    if (rows[0]) return rows[0];
+  }
+  return null;
+}
+
 async function upsertAdminPaymentOrder(executeQuery, {
   loanId,
   userId,
@@ -321,13 +343,12 @@ async function upsertAdminPaymentOrder(executeQuery, {
   const ts = toMysqlDatetime(transactionDate);
   const orderId = `ADMIN_${applicationNumber || loanId}_${paymentType}_T${transactionId}`;
 
-  const existing =
-    (transactionId != null
-      ? await findPaymentOrderByTransactionId(executeQuery, loanId, transactionId)
-      : null) ||
-    (transactionId == null
-      ? await findPaymentOrderByType(executeQuery, loanId, paymentType)
-      : null);
+  let existing = null;
+  if (transactionId != null) {
+    existing = await findPaymentOrderByTransactionId(executeQuery, loanId, transactionId);
+  } else {
+    existing = await findPaymentOrderByType(executeQuery, loanId, paymentType);
+  }
 
   if (existing) {
     await executeQuery(
@@ -523,24 +544,31 @@ async function syncAdminRepaymentTransaction(executeQuery, {
     );
   }
 
-  const orderId = await upsertAdminPaymentOrder(executeQuery, {
-    loanId,
-    userId,
-    applicationNumber,
-    paymentType,
-    amount,
-    transactionId: transaction.id,
-    transactionDate: txDate
-  });
+  const gatewayPo = await findExistingGatewayPaymentOrder(executeQuery, loanId, transaction);
+  let orderId;
+  if (gatewayPo) {
+    orderId = gatewayPo.order_id;
+    await linkTransactionToPaymentOrder(executeQuery, transaction.id, orderId);
+  } else {
+    orderId = await upsertAdminPaymentOrder(executeQuery, {
+      loanId,
+      userId,
+      applicationNumber,
+      paymentType,
+      amount,
+      transactionId: transaction.id,
+      transactionDate: txDate
+    });
 
-  await upsertAdminLoanPayment(executeQuery, {
-    loanId,
-    amount,
-    orderId,
-    transactionDate: txDate
-  });
+    await upsertAdminLoanPayment(executeQuery, {
+      loanId,
+      amount,
+      orderId,
+      transactionDate: txDate
+    });
 
-  await linkTransactionToPaymentOrder(executeQuery, transaction.id, orderId);
+    await linkTransactionToPaymentOrder(executeQuery, transaction.id, orderId);
+  }
 
   return {
     changed: true,
@@ -549,7 +577,8 @@ async function syncAdminRepaymentTransaction(executeQuery, {
     orderId,
     emiNumber,
     emiScheduleUpdated,
-    emiScheduleArray
+    emiScheduleArray,
+    linkedGatewayOrder: Boolean(gatewayPo)
   };
 }
 
@@ -725,6 +754,74 @@ async function backfillAdminRepaymentRecords(executeQuery, {
   return summary;
 }
 
+/**
+ * Mirror a newly inserted admin repayment transaction into payment_orders (idempotent).
+ * Call once after every completed admin repayment ledger entry.
+ */
+async function mirrorAdminRepaymentForNewTransaction(executeQuery, {
+  transactionId,
+  userId,
+  loanId,
+  txType,
+  amount,
+  txDate,
+  paymentMethod,
+  status,
+  description,
+  referenceNumber,
+  emiNumber = null,
+  skipEmiScheduleUpdate = true
+}) {
+  const type = String(txType || '').toLowerCase();
+  if (!ADMIN_REPAYMENT_TX_TYPES.has(type)) {
+    return { skipped: true, reason: 'not_repayment_type' };
+  }
+  if (!loanId || !transactionId || String(status || '').toLowerCase() !== 'completed') {
+    return { skipped: true, reason: 'invalid_params' };
+  }
+
+  const loans = await executeQuery(
+    `SELECT id, user_id, application_number, emi_schedule, status FROM loan_applications WHERE id = ?`,
+    [loanId]
+  );
+  if (!loans.length) {
+    return { skipped: true, reason: 'loan_not_found' };
+  }
+  const loan = loans[0];
+  if (loan.user_id != userId) {
+    return { skipped: true, reason: 'loan_user_mismatch' };
+  }
+
+  let resolvedEmiNumber = emiNumber;
+  if (type === 'emi_payment' && resolvedEmiNumber == null) {
+    resolvedEmiNumber = await resolveAdminEmiNumberForNewTransaction(
+      executeQuery,
+      loanId,
+      transactionId,
+      loan.emi_schedule,
+      description
+    );
+  }
+
+  return syncAdminRepaymentTransaction(executeQuery, {
+    transaction: {
+      id: transactionId,
+      user_id: userId,
+      loan_application_id: loanId,
+      transaction_type: type,
+      amount,
+      transaction_date: txDate,
+      payment_method: paymentMethod,
+      description,
+      reference_number: referenceNumber,
+      status
+    },
+    loan,
+    emiNumber: resolvedEmiNumber,
+    skipEmiScheduleUpdate
+  });
+}
+
 module.exports = {
   ADMIN_REPAYMENT_TX_TYPES,
   normalizeDateOnly,
@@ -734,7 +831,9 @@ module.exports = {
   markAdminEmiPaidInSchedule,
   rebuildEmiScheduleFromAdminEmiPayments,
   resolvePaymentTypeForAdminTransaction,
+  isGatewayOriginatedTransaction,
   syncAdminRepaymentTransaction,
+  mirrorAdminRepaymentForNewTransaction,
   countBackfillScope,
   backfillAdminRepaymentRecords
 };

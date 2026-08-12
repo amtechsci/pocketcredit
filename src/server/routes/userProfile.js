@@ -19,7 +19,8 @@ const {
 const {
   markAdminEmiPaidInSchedule,
   resolveAdminEmiNumberForNewTransaction,
-  syncAdminRepaymentTransaction
+  mirrorAdminRepaymentForNewTransaction,
+  ADMIN_REPAYMENT_TX_TYPES
 } = require('../utils/adminRepaymentSync');
 const { v4: uuidv4 } = require('uuid');
 const { markVerified: markEmploymentDocsVerified } = require('../services/employmentVerificationService');
@@ -3070,6 +3071,7 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
 
     let loanStatusUpdated = false;
     let newStatus = null;
+    let adminRepaymentEmiNumber = null;
 
     // If this is a loan disbursement, update the loan application status
     if (txType === 'loan_disbursement' && loan_application_id && !skipStatusUpdate) {
@@ -3712,31 +3714,6 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
           console.log(`✅ Loan #${loanIdInt} marked as cleared (${txType} received)`);
 
           try {
-            await syncAdminRepaymentTransaction(executeQuery, {
-              transaction: {
-                id: transactionId,
-                user_id: userIdInt,
-                loan_application_id: loanIdInt,
-                transaction_type: txType,
-                amount,
-                transaction_date: txDate,
-                payment_method: validPaymentMethod,
-                status: txStatus
-              },
-              loan: {
-                id: loanIdInt,
-                user_id: userIdInt,
-                application_number: loan.application_number,
-                emi_schedule: loan.emi_schedule,
-                status: 'cleared'
-              }
-            });
-          } catch (syncErr) {
-            console.error('❌ Admin repayment sync failed for full/settlement (non-fatal):', syncErr.message);
-          }
-
-          // Trigger automatic event-based SMS (loan_cleared)
-          try {
             const { triggerEventSMS } = require('../utils/eventSmsTrigger');
             await triggerEventSMS('loan_cleared', {
               userId: userIdInt,
@@ -3947,6 +3924,7 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
             emiSchedule,
             description
           );
+          adminRepaymentEmiNumber = emiNumber;
           const paymentAmount = parseFloat(amount) || 0;
           const paidDate = txDate || new Date().toISOString().split('T')[0];
 
@@ -3965,29 +3943,6 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
                 [JSON.stringify(emiSchedule), loanIdInt]
               );
               console.log(`📌 EMI #${emiNumber} marked paid by admin (₹${paymentAmount})`);
-            }
-
-            try {
-              await syncAdminRepaymentTransaction(executeQuery, {
-                transaction: {
-                  id: transactionId,
-                  user_id: userIdInt,
-                  loan_application_id: loanIdInt,
-                  transaction_type: txType,
-                  amount: paymentAmount,
-                  transaction_date: paidDate,
-                  payment_method: validPaymentMethod,
-                  status: txStatus
-                },
-                loan: {
-                  ...loan,
-                  emi_schedule: emiSchedule
-                },
-                emiNumber,
-                skipEmiScheduleUpdate: true
-              });
-            } catch (syncErr) {
-              console.error('❌ Admin repayment sync failed for EMI (non-fatal):', syncErr.message);
             }
 
             const totalEmis = emiSchedule.length;
@@ -4070,35 +4025,25 @@ router.post('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite
       }
     }
 
-    // Sync part_payment into payment_orders for BS repayment reporting
-    if (txType === 'part_payment' && loan_application_id) {
-      const loanIdInt = parseInt(loan_application_id);
-      const userIdInt = parseInt(userId);
-      const loans = await executeQuery(
-        'SELECT id, user_id, application_number, emi_schedule, status FROM loan_applications WHERE id = ?',
-        [loanIdInt]
-      );
-      if (loans.length > 0) {
-        const loan = loans[0];
-        if (loan.user_id == userIdInt || loan.user_id == userId) {
-          try {
-            await syncAdminRepaymentTransaction(executeQuery, {
-              transaction: {
-                id: transactionId,
-                user_id: userIdInt,
-                loan_application_id: loanIdInt,
-                transaction_type: txType,
-                amount,
-                transaction_date: txDate,
-                payment_method: validPaymentMethod,
-                status: txStatus
-              },
-              loan
-            });
-          } catch (syncErr) {
-            console.error('❌ Admin repayment sync failed for part_payment (non-fatal):', syncErr.message);
-          }
-        }
+    // Mirror every admin repayment into payment_orders (BS / CIBIL reports)
+    if (ADMIN_REPAYMENT_TX_TYPES.has(String(txType).toLowerCase()) && loan_application_id) {
+      try {
+        await mirrorAdminRepaymentForNewTransaction(executeQuery, {
+          transactionId,
+          userId: parseInt(userId, 10),
+          loanId: parseInt(loan_application_id, 10),
+          txType,
+          amount,
+          txDate,
+          paymentMethod: validPaymentMethod,
+          status: txStatus,
+          description,
+          referenceNumber: reference_number,
+          emiNumber: adminRepaymentEmiNumber,
+          skipEmiScheduleUpdate: true
+        });
+      } catch (syncErr) {
+        console.error('❌ Admin repayment mirror to payment_orders failed (non-fatal):', syncErr.message);
       }
     }
 

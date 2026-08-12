@@ -11,6 +11,18 @@ const {
 } = require('../utils/loanCalculations');
 const loanCalculationsRoute = require('./loanCalculations');
 const { backfillAdminRepaymentRecords, emiNumberFromAdminOrderId } = require('../utils/adminRepaymentSync');
+const {
+    ADMIN_REPAYMENT_PAYMENT_TYPES_SQL,
+    dedupeRepaymentReportRows,
+    fetchOrphanAdminRepaymentTransactions,
+    sqlLoanHasRepaymentActivity,
+    sqlCibilFirstRepaymentPayAt,
+    sqlCibilCombinedRepaymentPayAt,
+    sqlCibilCombinedRepaymentPayType,
+    sqlCibilSettlementFromCombined,
+    sqlCibilSettlementDateFromCombined,
+    sqlAdminRepaymentTxBase
+} = require('../utils/adminRepaymentReport');
 
 const router = express.Router();
 
@@ -758,6 +770,15 @@ const mapEmiNumberToClosureType = (emiNum) => {
     return 'part';
 };
 
+const bsRepaymentRowKey = (row) => {
+    const lid = row.lid;
+    if (row.po_id != null) return `${lid}:${row.po_id}`;
+    if (row.source_transaction_id != null) return `${lid}:tx${row.source_transaction_id}`;
+    return `${lid}:${row.order_id || 'unknown'}`;
+};
+
+const EMI_PAYMENT_TYPE_BY_NUM = { 1: 'emi_1st', 2: 'emi_2nd', 3: 'emi_3rd', 4: 'emi_4th' };
+
 /** Assign BS EMI # per payment_order row. Gateway LOAN_* orders keep emi_1st/emi_2nd tags; only duplicate ADMIN emi_1st rows get sequential slots. */
 const buildBsRepaymentEmiNumberMap = (rows) => {
     const map = new Map();
@@ -776,7 +797,8 @@ const buildBsRepaymentEmiNumberMap = (rows) => {
             const ta = new Date(a.transaction_date).getTime();
             const tb = new Date(b.transaction_date).getTime();
             if (ta !== tb) return ta - tb;
-            return (parseInt(a.po_id, 10) || 0) - (parseInt(b.po_id, 10) || 0);
+            return (parseInt(a.po_id, 10) || parseInt(a.source_transaction_id, 10) || 0) -
+                (parseInt(b.po_id, 10) || parseInt(b.source_transaction_id, 10) || 0);
         });
 
         // Pass 1: trust EMI tag embedded in gateway/admin order_id or payment_type
@@ -784,7 +806,7 @@ const buildBsRepaymentEmiNumberMap = (rows) => {
             const emiNum =
                 emiNumberFromAdminOrderId(r.order_id) ?? emiNumberFromPaymentType(r.payment_type);
             if (emiNum != null) {
-                map.set(`${lid}:${r.po_id}`, emiNum);
+                map.set(bsRepaymentRowKey(r), emiNum);
             }
         }
 
@@ -797,13 +819,13 @@ const buildBsRepaymentEmiNumberMap = (rows) => {
             return tagged === 1;
         });
         if (adminEmi1stRows.length > 1) {
-            adminEmi1stRows.forEach((r, idx) => map.set(`${lid}:${r.po_id}`, idx + 1));
+            adminEmi1stRows.forEach((r, idx) => map.set(bsRepaymentRowKey(r), idx + 1));
         }
 
         // Pass 3: anything still untagged — fill gaps sequentially (legacy rows)
         const used = new Set([...map.values()]);
         for (const r of loanRows) {
-            const key = `${lid}:${r.po_id}`;
+            const key = bsRepaymentRowKey(r);
             if (map.has(key)) continue;
             let next = 1;
             while (used.has(next)) next += 1;
@@ -1041,7 +1063,7 @@ const CIBIL_FORCE_QUOTE_INDICES = [1, 24, 25, 26, 27, 29, 30, 31, 32, 33, 34, 35
 const CIBIL_PAID_REPAYMENT_TYPES_SQL = `('emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th', 'loan_repayment', 'full_payment', 'pre-close')`;
 
 /** Cleared-report activity: regular repayments plus settlement (user paid a reduced lump sum). */
-const CIBIL_CLEARED_ACTIVITY_PAYMENT_TYPES_SQL = `('emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th', 'loan_repayment', 'full_payment', 'pre-close', 'settlement')`;
+const CIBIL_CLEARED_ACTIVITY_PAYMENT_TYPES_SQL = ADMIN_REPAYMENT_PAYMENT_TYPES_SQL;
 
 /** Total of first two EMI amounts from emi_schedule for CIBIL current balance at origination. */
 const sumEmi1And2FromSchedule = (loan) => {
@@ -1182,28 +1204,12 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
                 la.closed_date,
                 la.updated_at as cleared_at, la.exhausted_period_days,
                 la.processed_penalty, la.status, la.plan_snapshot, la.emi_schedule,
-                (SELECT MIN(po_m.updated_at) FROM payment_orders po_m
-                 WHERE po_m.loan_id = la.id AND po_m.status = 'PAID'
-                 AND po_m.payment_type IN ${CIBIL_CLEARED_ACTIVITY_PAYMENT_TYPES_SQL}
-                ) as first_instalment_paid_at,
-                (SELECT po1.updated_at FROM payment_orders po1
-                 WHERE po1.loan_id = la.id AND po1.status = 'PAID'
-                 AND po1.payment_type IN ${CIBIL_CLEARED_ACTIVITY_PAYMENT_TYPES_SQL}
-                 ORDER BY po1.updated_at ASC LIMIT 1) as cibil_ord_pay_1_at,
-                (SELECT po1.payment_type FROM payment_orders po1
-                 WHERE po1.loan_id = la.id AND po1.status = 'PAID'
-                 AND po1.payment_type IN ${CIBIL_CLEARED_ACTIVITY_PAYMENT_TYPES_SQL}
-                 ORDER BY po1.updated_at ASC LIMIT 1) as cibil_ord_pay_1_type,
-                (SELECT po2.updated_at FROM payment_orders po2
-                 WHERE po2.loan_id = la.id AND po2.status = 'PAID'
-                 AND po2.payment_type IN ${CIBIL_CLEARED_ACTIVITY_PAYMENT_TYPES_SQL}
-                 ORDER BY po2.updated_at ASC LIMIT 1 OFFSET 1) as cibil_ord_pay_2_at,
-                (SELECT po_s.updated_at FROM payment_orders po_s
-                 WHERE po_s.loan_id = la.id AND po_s.payment_type = 'settlement' AND po_s.status = 'PAID'
-                 ORDER BY po_s.updated_at DESC LIMIT 1) as settlement_paid_at,
-                (SELECT po_s.amount FROM payment_orders po_s
-                 WHERE po_s.loan_id = la.id AND po_s.payment_type = 'settlement' AND po_s.status = 'PAID'
-                 ORDER BY po_s.updated_at DESC LIMIT 1) as settlement_order_amount,
+                ${sqlCibilFirstRepaymentPayAt('la.id')} as first_instalment_paid_at,
+                ${sqlCibilCombinedRepaymentPayAt('la.id', 0)} as cibil_ord_pay_1_at,
+                ${sqlCibilCombinedRepaymentPayType('la.id', 0)} as cibil_ord_pay_1_type,
+                ${sqlCibilCombinedRepaymentPayAt('la.id', 1)} as cibil_ord_pay_2_at,
+                ${sqlCibilSettlementDateFromCombined('la.id')} as settlement_paid_at,
+                ${sqlCibilSettlementFromCombined('la.id')} as settlement_order_amount,
                 ${CIBIL_ADDRESS_LINE1_SUBQUERY} as address_line1,
                 ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
                 ${CIBIL_CITY_SUBQUERY} as city,
@@ -1217,26 +1223,27 @@ router.get('/cibil/cleared', authenticateAdmin, async (req, res) => {
             AND (
                 la.status IN ('cleared', 'settled')
                 OR EXISTS (
-                    SELECT 1 FROM payment_orders po 
+                    SELECT 1 FROM payment_orders po
                     WHERE po.loan_id = la.id AND po.status = 'PAID'
                     AND po.payment_type IN ${CIBIL_CLEARED_ACTIVITY_PAYMENT_TYPES_SQL}
+                )
+                OR EXISTS (
+                    SELECT 1 FROM transactions t_act
+                    WHERE t_act.loan_application_id = la.id
+                      AND ${sqlAdminRepaymentTxBase('t_act')}
                 )
             )
         `;
 
         const params = [];
         if (from_date && to_date) {
-            // Month / range: any EMI / repayment / settlement PAID in range, or closure in range.
-            sql += ` AND (
-                EXISTS (
-                    SELECT 1 FROM payment_orders po_d
-                    WHERE po_d.loan_id = la.id AND po_d.status = 'PAID'
-                    AND po_d.payment_type IN ${CIBIL_CLEARED_ACTIVITY_PAYMENT_TYPES_SQL}
-                    AND DATE(po_d.updated_at) BETWEEN ? AND ?
-                )
-                OR (la.closed_date IS NOT NULL AND DATE(la.closed_date) BETWEEN ? AND ?)
-            )`;
-            params.push(from_date, to_date, from_date, to_date);
+            const activityInRange = sqlLoanHasRepaymentActivity('la.id', {
+                dateFrom: from_date,
+                dateTo: to_date
+            });
+            // Month / range: any EMI / repayment / settlement in range, or closure in range.
+            sql += ` AND (${activityInRange.sql} OR (la.closed_date IS NOT NULL AND DATE(la.closed_date) BETWEEN ? AND ?))`;
+            params.push(...activityInRange.extraParams, from_date, to_date);
         }
         sql += ` ORDER BY COALESCE(la.closed_date, la.updated_at) DESC`;
 
@@ -1413,7 +1420,8 @@ router.get('/cibil/settled', authenticateAdmin, async (req, res) => {
                 la.total_repayable, la.disbursed_at, la.processed_at,
                 la.updated_at as cleared_at, la.exhausted_period_days,
                 la.processed_penalty, la.status, la.plan_snapshot,
-                po.amount as settlement_amount, po.updated_at as settlement_date,
+                ${sqlCibilSettlementFromCombined('la.id')} as settlement_amount,
+                ${sqlCibilSettlementDateFromCombined('la.id')} as settlement_date,
                 ${CIBIL_ADDRESS_LINE1_SUBQUERY} as address_line1,
                 ${CIBIL_ADDRESS_LINE2_SUBQUERY} as address_line2,
                 ${CIBIL_CITY_SUBQUERY} as city,
@@ -1423,16 +1431,40 @@ router.get('/cibil/settled', authenticateAdmin, async (req, res) => {
                 ${CIBIL_COUNTRY_SUBQUERY} as country
             FROM loan_applications la
             INNER JOIN users u ON la.user_id = u.id
-            INNER JOIN payment_orders po ON po.loan_id = la.id AND po.payment_type = 'settlement' AND po.status = 'PAID'
             WHERE la.status IN ('cleared', 'settled')
+            AND (
+                EXISTS (
+                    SELECT 1 FROM payment_orders po
+                    WHERE po.loan_id = la.id AND po.payment_type = 'settlement' AND po.status = 'PAID'
+                )
+                OR EXISTS (
+                    SELECT 1 FROM transactions t
+                    WHERE t.loan_application_id = la.id
+                      AND t.transaction_type = 'settlement'
+                      AND ${sqlAdminRepaymentTxBase('t')}
+                )
+            )
         `;
 
         const params = [];
         if (from_date && to_date) {
-            sql += ` AND DATE(po.updated_at) BETWEEN ? AND ?`;
-            params.push(from_date, to_date);
+            sql += ` AND (
+                EXISTS (
+                    SELECT 1 FROM payment_orders po
+                    WHERE po.loan_id = la.id AND po.payment_type = 'settlement' AND po.status = 'PAID'
+                    AND DATE(po.updated_at) BETWEEN ? AND ?
+                )
+                OR EXISTS (
+                    SELECT 1 FROM transactions t
+                    WHERE t.loan_application_id = la.id
+                      AND t.transaction_type = 'settlement'
+                      AND ${sqlAdminRepaymentTxBase('t')}
+                      AND DATE(t.transaction_date) BETWEEN ? AND ?
+                )
+            )`;
+            params.push(from_date, to_date, from_date, to_date);
         }
-        sql += ` ORDER BY po.updated_at DESC`;
+        sql += ` ORDER BY settlement_date DESC`;
 
         const loans = await executeQuery(sql, params);
 
@@ -1649,6 +1681,11 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 COALESCE(lp.transaction_id, po.order_id) as transaction_number,
                 po.id as po_id,
                 po.order_id as order_id,
+                CASE
+                    WHEN po.order_id REGEXP '_T[0-9]+$'
+                    THEN CAST(SUBSTRING_INDEX(po.order_id, '_T', -1) AS UNSIGNED)
+                    ELSE NULL
+                END AS source_transaction_id,
                 (
                     SELECT t.reference_number
                     FROM transactions t
@@ -1693,6 +1730,13 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 la.emi_schedule as emi_schedule,
                 la.interest_percent_per_day as interest_percent_per_day
             FROM payment_orders po
+            INNER JOIN (
+                SELECT MIN(id) AS id
+                FROM payment_orders
+                WHERE status = 'PAID'
+                  AND payment_type IN ('settlement', 'pre-close', 'full_payment', 'loan_repayment', 'emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th')
+                GROUP BY order_id
+            ) po_one ON po_one.id = po.id
             INNER JOIN loan_applications la ON la.id = po.loan_id
             INNER JOIN users u ON u.id = la.user_id
             LEFT JOIN loan_payments lp ON lp.id = (
@@ -1703,6 +1747,17 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
             )
             WHERE po.status = 'PAID'
             AND po.payment_type IN ('settlement', 'pre-close', 'full_payment', 'loan_repayment', 'emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th')
+            AND NOT (
+                po.order_id LIKE 'ADMIN_%'
+                AND EXISTS (
+                    SELECT 1 FROM payment_orders po_g
+                    WHERE po_g.loan_id = po.loan_id
+                      AND po_g.status = 'PAID'
+                      AND po_g.order_id LIKE 'LOAN_%'
+                      AND po_g.payment_type = po.payment_type
+                      AND ABS(po_g.amount - po.amount) < 0.02
+                )
+            )
         `;
 
         const params = [];
@@ -1714,7 +1769,15 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
 
         let rows;
         try {
-            rows = await executeQuery(sql, params);
+            rows = dedupeRepaymentReportRows(await executeQuery(sql, params));
+            const orphans = await fetchOrphanAdminRepaymentTransactions(executeQuery, {
+                from_date,
+                to_date,
+                stateNameSubquery: CIBIL_STATE_NAME_SUBQUERY
+            });
+            if (orphans.length) {
+                rows = dedupeRepaymentReportRows([...rows, ...orphans]);
+            }
         } catch (error) {
             // Fallback to old transaction_details structure if new structure doesn't work
             console.warn('New payment structure not found, trying old transaction_details:', error.message);
@@ -1789,7 +1852,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
             const voucher_no = 'PLL' + row.lid;
             const paymentType = row.payment_type || '';
             const emiNum =
-                bsRepaymentEmiMap.get(`${row.lid}:${row.po_id}`) ??
+                bsRepaymentEmiMap.get(bsRepaymentRowKey(row)) ??
                 emiNumberFromAdminOrderId(row.order_id) ??
                 emiNumberFromPaymentType(paymentType);
             const loan_closure_type =
