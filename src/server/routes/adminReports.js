@@ -758,7 +758,7 @@ const mapEmiNumberToClosureType = (emiNum) => {
     return 'part';
 };
 
-/** When payment_orders duplicate emi_1st, assign EMI # by payment chronology per loan. */
+/** Assign BS EMI # per payment_order row. Gateway LOAN_* orders keep emi_1st/emi_2nd tags; only duplicate ADMIN emi_1st rows get sequential slots. */
 const buildBsRepaymentEmiNumberMap = (rows) => {
     const map = new Map();
     const byLoan = new Map();
@@ -779,27 +779,36 @@ const buildBsRepaymentEmiNumberMap = (rows) => {
             return (parseInt(a.po_id, 10) || 0) - (parseInt(b.po_id, 10) || 0);
         });
 
-        const resolved = loanRows.map((r) => ({
-            row: r,
-            emiNum: emiNumberFromAdminOrderId(r.order_id) ?? emiNumberFromPaymentType(r.payment_type)
-        }));
-
-        const used = new Set();
-        let needsSequential = false;
-        for (const item of resolved) {
-            if (item.emiNum == null || used.has(item.emiNum)) {
-                needsSequential = true;
-                break;
+        // Pass 1: trust EMI tag embedded in gateway/admin order_id or payment_type
+        for (const r of loanRows) {
+            const emiNum =
+                emiNumberFromAdminOrderId(r.order_id) ?? emiNumberFromPaymentType(r.payment_type);
+            if (emiNum != null) {
+                map.set(`${lid}:${r.po_id}`, emiNum);
             }
-            used.add(item.emiNum);
         }
 
-        if (needsSequential) {
-            loanRows.forEach((r, idx) => map.set(`${lid}:${r.po_id}`, idx + 1));
-        } else {
-            for (const item of resolved) {
-                map.set(`${lid}:${item.row.po_id}`, item.emiNum);
-            }
+        // Pass 2: duplicate ADMIN rows all tagged emi_1st → 1st payment EMI1, 2nd → EMI2, …
+        const adminEmi1stRows = loanRows.filter((r) => {
+            const orderId = String(r.order_id || '');
+            if (!orderId.startsWith('ADMIN_')) return false;
+            const tagged =
+                emiNumberFromAdminOrderId(orderId) ?? emiNumberFromPaymentType(r.payment_type);
+            return tagged === 1;
+        });
+        if (adminEmi1stRows.length > 1) {
+            adminEmi1stRows.forEach((r, idx) => map.set(`${lid}:${r.po_id}`, idx + 1));
+        }
+
+        // Pass 3: anything still untagged — fill gaps sequentially (legacy rows)
+        const used = new Set([...map.values()]);
+        for (const r of loanRows) {
+            const key = `${lid}:${r.po_id}`;
+            if (map.has(key)) continue;
+            let next = 1;
+            while (used.has(next)) next += 1;
+            map.set(key, next);
+            used.add(next);
         }
     }
 
@@ -1686,7 +1695,12 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
             FROM payment_orders po
             INNER JOIN loan_applications la ON la.id = po.loan_id
             INNER JOIN users u ON u.id = la.user_id
-            LEFT JOIN loan_payments lp ON lp.loan_id = po.loan_id AND lp.transaction_id = po.order_id
+            LEFT JOIN loan_payments lp ON lp.id = (
+                SELECT MIN(lp2.id)
+                FROM loan_payments lp2
+                WHERE lp2.loan_id = po.loan_id
+                  AND lp2.transaction_id = po.order_id
+            )
             WHERE po.status = 'PAID'
             AND po.payment_type IN ('settlement', 'pre-close', 'full_payment', 'loan_repayment', 'emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th')
         `;
