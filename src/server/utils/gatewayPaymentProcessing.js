@@ -104,8 +104,8 @@ async function ensureGatewayPaymentLedgerRecords(executeQuery, {
       `INSERT INTO transactions (
          user_id, loan_application_id, transaction_type, amount, description,
          category, payment_method, reference_number, transaction_date,
-         status, priority, created_by, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, 'loan', 'other', ?, CURDATE(), 'completed', 'high', ?, NOW(), NOW())`,
+         status, priority, additional_notes, created_by, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, 'loan', 'other', ?, CURDATE(), 'completed', 'high', ?, ?, NOW(), NOW())`,
       [
         userId,
         loanId,
@@ -113,6 +113,7 @@ async function ensureGatewayPaymentLedgerRecords(executeQuery, {
         amount,
         description,
         ref,
+        '[source:pg_normal]',
         systemAdminId
       ]
     );

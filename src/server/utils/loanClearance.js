@@ -499,8 +499,8 @@ async function recordEnachLedgerTransaction({
     `INSERT INTO transactions (
       user_id, loan_application_id, transaction_type, amount, description,
       category, payment_method, reference_number, transaction_date,
-      status, priority, created_by, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, 'loan', 'other', ?, ?, 'completed', 'high', ?, NOW(), NOW())`,
+      status, priority, additional_notes, created_by, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, 'loan', 'other', ?, ?, 'completed', 'high', ?, ?, NOW(), NOW())`,
     [
       loan.user_id,
       loan.id,
@@ -509,6 +509,7 @@ async function recordEnachLedgerTransaction({
       `EMI ${emiNumber} via eNACH auto-debit — payment ${reference}${utr}`,
       reference,
       today,
+      '[source:pg_enach]',
       systemAdminId
     ]
   );

@@ -159,24 +159,43 @@ function getTransactionUpdatedByLabel(transaction: {
   description?: string;
   payment_method?: string;
   additional_notes?: string;
+  reference_number?: string;
 }) {
   if (transaction.updated_by_label) {
     return transaction.updated_by_label;
   }
 
-  const notes = String(transaction.additional_notes || '');
-  if (notes.includes('[updated_by:manual]')) {
-    return 'manual';
+  const notes = String(transaction.additional_notes || '').toLowerCase();
+  if (notes.includes('[source:pg_enach]') || notes.includes('[updated_by:pg_enach]')) {
+    return 'PG Enach';
+  }
+  if (notes.includes('[source:pg_normal]') || notes.includes('[updated_by:pg_normal]')) {
+    return 'PG normal';
   }
 
   const desc = String(transaction.description || '').toLowerCase();
+  const method = String(transaction.payment_method || '').toLowerCase();
+  const ref = String(transaction.reference_number || '').toLowerCase();
+
   if (desc.includes('enach')) {
     return 'PG Enach';
   }
 
-  const method = String(transaction.payment_method || '').toLowerCase();
-  if (desc.includes('cashfree') || method === 'cashfree_payout') {
+  if (
+    desc.includes('cashfree')
+    || desc.includes('order: loan_')
+    || desc.includes('order: ext_')
+    || desc.includes('order: recov')
+    || method === 'cashfree'
+    || method === 'cashfree_payout'
+    || ref.startsWith('loan_')
+    || ref.startsWith('ext_')
+  ) {
     return 'PG normal';
+  }
+
+  if (notes.includes('[updated_by:manual]')) {
+    return 'manual';
   }
 
   return 'manual';

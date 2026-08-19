@@ -2810,7 +2810,8 @@ router.put('/:userId/transactions/:transactionId', authenticateAdmin, denyRecove
 
     // Check if transaction exists and belongs to user, and get loan_application_id
     const transactionCheck = await executeQuery(
-      'SELECT id, loan_application_id, additional_notes FROM transactions WHERE id = ? AND user_id = ?',
+      `SELECT id, loan_application_id, description, payment_method, reference_number, additional_notes
+       FROM transactions WHERE id = ? AND user_id = ?`,
       [transactionId, userId]
     );
 
@@ -2823,7 +2824,7 @@ router.put('/:userId/transactions/:transactionId', authenticateAdmin, denyRecove
 
     const transaction = transactionCheck[0];
     const loanApplicationId = transaction.loan_application_id;
-    const additionalNotes = appendManualUpdateMarker(transaction.additional_notes);
+    const additionalNotes = appendManualUpdateMarker(transaction.additional_notes, transaction);
 
     // Update transaction
     await executeQuery(
@@ -2851,7 +2852,10 @@ router.put('/:userId/transactions/:transactionId', authenticateAdmin, denyRecove
       data: {
         transactionId,
         reference_number: reference_number.trim(),
-        updated_by_label: 'manual'
+        updated_by_label: getTransactionUpdatedByLabel({
+          ...transaction,
+          reference_number: reference_number.trim()
+        })
       }
     });
 
