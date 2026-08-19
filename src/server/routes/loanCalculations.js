@@ -1154,6 +1154,22 @@ async function computeLoanCalculationResponseData(loanId, opts = {}) {
                       : baseInstalment
                 };
 
+                const entryStatus = String(entry.status || '').toLowerCase();
+                const storedPaidAmt = parseFloat(storedEmi.paid_amount);
+                if (
+                  (entryStatus === 'paid' || entryStatus === 'completed') &&
+                  !Number.isNaN(storedPaidAmt) &&
+                  storedPaidAmt > 0
+                ) {
+                  // Paid EMIs: display amount = what was collected (admin dashboard / gateway).
+                  entry.emi_amount = storedPaidAmt;
+                  entry.paid_amount = storedPaidAmt;
+                  entry.penalty_base = 0;
+                  entry.penalty_gst = 0;
+                  entry.penalty_total = 0;
+                  entry.dpd_interest_on_total_principal = 0;
+                }
+
                 if (instalment.paid_date) {
                   entry.paid_date = instalment.paid_date;
                 }

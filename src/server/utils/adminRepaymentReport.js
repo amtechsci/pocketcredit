@@ -262,6 +262,70 @@ const fetchOrphanAdminRepaymentTransactions = async (
   return orphans;
 };
 
+/**
+ * Loan extension ledger rows without a matching PAID extension_fee payment_order (BS repayment CSV).
+ */
+const fetchOrphanExtensionRepaymentTransactions = async (
+  executeQuery,
+  { from_date, to_date, stateNameSubquery }
+) => {
+  let sql = `
+    SELECT
+      u.id AS user_id,
+      CONCAT('PC', LPAD(u.id, 5, '0')) AS rcid,
+      CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) AS pan_name,
+      ${stateNameSubquery} AS state_name,
+      la.id AS lid,
+      la.disbursal_amount AS processed_amount,
+      la.processing_fee AS p_fee,
+      la.total_interest AS service_charge,
+      la.processed_penalty AS penality_charge,
+      la.processed_due_date,
+      la.loan_amount AS principal_amount,
+      la.loan_amount AS amount,
+      la.processing_fee AS processing_fees,
+      la.processing_fee_percent AS pro_fee_per,
+      COALESCE(la.interest_percent_per_day * 100, 0) AS interest_percentage,
+      t.id AS source_transaction_id,
+      NULL AS po_id,
+      CONCAT('EXT_TX_', t.id) AS order_id,
+      CONCAT('EXT_TX_', t.id) AS transaction_number,
+      t.reference_number AS payment_reference_number,
+      t.transaction_date AS transaction_date,
+      'extension_fee' AS payment_type,
+      t.amount AS transaction_amount,
+      la.processed_at AS loan_start_date,
+      la.fees_breakdown AS fees_breakdown,
+      la.processed_p_fee AS processed_p_fee,
+      la.processed_post_service_fee AS processed_post_service_fee,
+      la.processed_gst AS processed_gst,
+      la.plan_snapshot AS plan_snapshot,
+      la.emi_schedule AS emi_schedule,
+      la.interest_percent_per_day AS interest_percent_per_day
+    FROM transactions t
+    INNER JOIN loan_applications la ON la.id = t.loan_application_id
+    INNER JOIN users u ON u.id = la.user_id
+    WHERE t.status = 'completed'
+      AND t.loan_application_id IS NOT NULL
+      AND t.transaction_type LIKE 'loan_extension%'
+      AND NOT EXISTS (
+        SELECT 1 FROM payment_orders po
+        WHERE po.loan_id = t.loan_application_id
+          AND po.status = 'PAID'
+          AND po.payment_type = 'extension_fee'
+          AND ABS(po.amount - t.amount) < 0.02
+          AND DATE(po.updated_at) = DATE(t.transaction_date)
+      )
+  `;
+  const params = [];
+  if (from_date && to_date) {
+    sql += ` AND DATE(t.transaction_date) BETWEEN ? AND ?`;
+    params.push(from_date, to_date);
+  }
+  sql += ` ORDER BY t.loan_application_id ASC, t.transaction_date ASC, t.id ASC`;
+  return await executeQuery(sql, params);
+};
+
 module.exports = {
   ADMIN_REPAYMENT_TX_TYPES_SQL,
   ADMIN_REPAYMENT_PAYMENT_TYPES_SQL,
@@ -277,5 +341,6 @@ module.exports = {
   sqlCibilSettlementFromCombined,
   sqlCibilSettlementDateFromCombined,
   dedupeRepaymentReportRows,
-  fetchOrphanAdminRepaymentTransactions
+  fetchOrphanAdminRepaymentTransactions,
+  fetchOrphanExtensionRepaymentTransactions
 };

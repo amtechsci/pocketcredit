@@ -13,6 +13,7 @@ const axios = require('axios');
 const { generateKFSHTML } = require('../utils/kfsHtmlGenerator');
 const { generateLoanAgreementHTML } = require('../utils/loanAgreementHtmlGenerator');
 const { calculatePaymentAmount } = require('../utils/paymentAmount');
+const { getTransactionUpdatedByLabel, appendManualUpdateMarker } = require('../utils/transactionSource');
 const {
   evaluateLoanClearanceEligibility
 } = require('../utils/loanClearance');
@@ -2809,7 +2810,7 @@ router.put('/:userId/transactions/:transactionId', authenticateAdmin, denyRecove
 
     // Check if transaction exists and belongs to user, and get loan_application_id
     const transactionCheck = await executeQuery(
-      'SELECT id, loan_application_id FROM transactions WHERE id = ? AND user_id = ?',
+      'SELECT id, loan_application_id, additional_notes FROM transactions WHERE id = ? AND user_id = ?',
       [transactionId, userId]
     );
 
@@ -2822,13 +2823,14 @@ router.put('/:userId/transactions/:transactionId', authenticateAdmin, denyRecove
 
     const transaction = transactionCheck[0];
     const loanApplicationId = transaction.loan_application_id;
+    const additionalNotes = appendManualUpdateMarker(transaction.additional_notes);
 
     // Update transaction
     await executeQuery(
       `UPDATE transactions 
-       SET reference_number = ?, updated_at = NOW() 
+       SET reference_number = ?, additional_notes = ?, updated_at = NOW() 
        WHERE id = ? AND user_id = ?`,
-      [reference_number.trim(), transactionId, userId]
+      [reference_number.trim(), additionalNotes, transactionId, userId]
     );
 
     console.log('✅ Transaction reference number updated successfully');
@@ -2846,7 +2848,11 @@ router.put('/:userId/transactions/:transactionId', authenticateAdmin, denyRecove
     res.json({
       status: 'success',
       message: 'Transaction reference number updated successfully',
-      data: { transactionId, reference_number: reference_number.trim() }
+      data: {
+        transactionId,
+        reference_number: reference_number.trim(),
+        updated_by_label: 'manual'
+      }
     });
 
   } catch (error) {
@@ -4087,7 +4093,7 @@ router.get('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite,
         t.id, t.user_id, t.loan_application_id, t.transaction_type, 
         t.amount, 
         DATE_FORMAT(t.transaction_date, '%Y-%m-%d') as transaction_date, 
-        t.reference_number, t.payment_method,
+        t.reference_number, t.payment_method, t.description, t.additional_notes,
         t.status, t.created_by,
         DATE_FORMAT(t.created_at, '%Y-%m-%d') as created_at,
         DATE_FORMAT(t.updated_at, '%Y-%m-%d') as updated_at,
@@ -4100,9 +4106,14 @@ router.get('/:userId/transactions', authenticateAdmin, denyRecoveryOfficerWrite,
       ORDER BY t.transaction_date DESC, t.created_at DESC
     `, [userId]);
 
+    const data = (transactions || []).map((tx) => ({
+      ...tx,
+      updated_by_label: getTransactionUpdatedByLabel(tx)
+    }));
+
     res.json({
       status: 'success',
-      data: transactions
+      data
     });
   } catch (error) {
     console.error('Get transactions error:', error);

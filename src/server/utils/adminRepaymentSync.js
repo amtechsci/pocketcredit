@@ -214,7 +214,16 @@ function markAdminEmiPaidInSchedule(emiScheduleRaw, emiNumber, paymentAmount, pa
     status: fullyPaid ? 'paid' : 'pending',
     paid_date: date,
     paid_amount: paid,
-    instalment_amount: parseFloat(baseInstalment) || paid
+    // Admin dashboard closes the EMI at the recorded amount — emi_amount must match paid_amount
+    // (pre-payment calc refresh may have inflated emi_amount with penalty/DPD).
+    emi_amount: fullyPaid ? paid : (emi.emi_amount != null ? emi.emi_amount : paid),
+    instalment_amount: parseFloat(baseInstalment) || paid,
+    penalty_base: fullyPaid ? 0 : (emi.penalty_base || 0),
+    penalty_gst: fullyPaid ? 0 : (emi.penalty_gst || 0),
+    penalty_total: fullyPaid ? 0 : (emi.penalty_total || 0),
+    dpd_interest_on_total_principal: fullyPaid
+      ? 0
+      : (emi.dpd_interest_on_total_principal || emi.dpd_interest || 0)
   };
 
   return {

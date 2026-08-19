@@ -213,7 +213,14 @@ function markGatewayEmiPaidInSchedule(emiScheduleRaw, emiNumber, paymentAmount, 
     status: fullyPaid ? 'paid' : 'pending',
     paid_date: date,
     paid_amount: paid,
-    instalment_amount: parseFloat(baseInstalment) || paid
+    emi_amount: fullyPaid ? paid : (emi.emi_amount != null ? emi.emi_amount : paid),
+    instalment_amount: parseFloat(baseInstalment) || paid,
+    penalty_base: fullyPaid ? 0 : (emi.penalty_base || 0),
+    penalty_gst: fullyPaid ? 0 : (emi.penalty_gst || 0),
+    penalty_total: fullyPaid ? 0 : (emi.penalty_total || 0),
+    dpd_interest_on_total_principal: fullyPaid
+      ? 0
+      : (emi.dpd_interest_on_total_principal || emi.dpd_interest || 0)
   };
 
   return { updated: true, emiScheduleArray: schedule, emiFullyPaid: fullyPaid };
@@ -480,7 +487,9 @@ async function recordEnachLedgerTransaction({
     const emi = schedule[emiNumber - 1];
     emiFullyPaid = emi ? isEmiFullyPaid(emi) : false;
   }
-  const txType = emiFullyPaid ? 'emi_payment' : 'part_payment';
+  // Targeted eNACH EMI debits are always EMI collections — never "part_payment" in txn history.
+  const txType =
+    emiNumber > 0 ? 'emi_payment' : emiFullyPaid ? 'emi_payment' : 'part_payment';
   const today = new Date().toISOString().split('T')[0];
   const utr = bankReference && String(bankReference) !== reference
     ? ` (UTR ${bankReference})`
@@ -507,6 +516,219 @@ async function recordEnachLedgerTransaction({
   return { created: true, transactionType: txType };
 }
 
+/**
+ * Repair eNACH EMI debits wrongly logged as part_payment (e.g. PLL6342 EMI2).
+ * Updates txn type, marks the EMI paid on schedule, and clears loan if fully paid.
+ */
+async function repairMisclassifiedEnachEmiLedger(executeQuery, {
+  loanId,
+  transactionId = null,
+  emiNumber = null,
+  dryRun = false
+} = {}) {
+  const lid = parseInt(loanId, 10);
+  if (!lid) {
+    return { changed: false, reason: 'invalid_loan_id' };
+  }
+
+  let sql = `
+    SELECT id, transaction_type, amount, description, reference_number, transaction_date
+    FROM transactions
+    WHERE loan_application_id = ?
+      AND status = 'completed'
+      AND (
+        transaction_type = 'part_payment'
+        OR (transaction_type = 'emi_payment' AND description LIKE '%eNACH%')
+      )
+      AND description LIKE '%eNACH%'
+  `;
+  const params = [lid];
+  if (transactionId != null) {
+    sql += ' AND id = ?';
+    params.push(parseInt(transactionId, 10));
+  }
+  sql += ' ORDER BY transaction_date ASC, id ASC';
+
+  const txs = await executeQuery(sql, params);
+  if (!txs.length) {
+    return { changed: false, reason: 'no_enach_transactions', loanId: lid };
+  }
+
+  const loans = await executeQuery(
+    `SELECT id, user_id, emi_schedule, status, total_repayable FROM loan_applications WHERE id = ?`,
+    [lid]
+  );
+  if (!loans.length) {
+    return { changed: false, reason: 'loan_not_found', loanId: lid };
+  }
+  const loan = loans[0];
+  let schedule = parseEmiSchedule(loan.emi_schedule) || [];
+  const repaired = [];
+
+  for (const tx of txs) {
+    const desc = String(tx.description || '');
+    let emiNum = emiNumber != null ? parseInt(emiNumber, 10) : null;
+    if (!emiNum) {
+      const m = desc.match(/EMI\s+(\d+)/i);
+      if (m) emiNum = parseInt(m[1], 10);
+    }
+    if (!emiNum || emiNum < 1) {
+      repaired.push({ transaction_id: tx.id, skipped: true, reason: 'emi_number_unknown' });
+      continue;
+    }
+
+    const idx = emiNum - 1;
+    if (!schedule[idx]) {
+      repaired.push({ transaction_id: tx.id, skipped: true, reason: 'emi_not_in_schedule', emiNumber: emiNum });
+      continue;
+    }
+
+    const paidDate = normalizeDateOnly(tx.transaction_date);
+    const paidAmt = parseFloat(tx.amount) || 0;
+    const emi = schedule[idx];
+    schedule[idx] = {
+      ...emi,
+      status: 'paid',
+      paid_date: paidDate,
+      paid_amount: paidAmt
+    };
+
+    if (!dryRun && tx.transaction_type === 'part_payment') {
+      await executeQuery(
+        `UPDATE transactions SET transaction_type = 'emi_payment', updated_at = NOW() WHERE id = ?`,
+        [tx.id]
+      );
+    }
+
+    repaired.push({
+      transaction_id: tx.id,
+      emiNumber: emiNum,
+      typeFixed: tx.transaction_type === 'part_payment',
+      amount: paidAmt
+    });
+  }
+
+  let loanCleared = false;
+  if (repaired.some((r) => !r.skipped)) {
+    if (!dryRun) {
+      await executeQuery(
+        `UPDATE loan_applications SET emi_schedule = ?, updated_at = NOW() WHERE id = ?`,
+        [JSON.stringify(schedule), lid]
+      );
+    }
+
+    const clearance = await evaluateLoanClearanceEligibility({
+      executeQuery,
+      loan: { ...loan, emi_schedule: schedule },
+      emiSchedule: schedule
+    });
+
+    if (clearance.shouldClear && !dryRun) {
+      const closedAmount = clearance.amountDue || parseFloat(loan.total_repayable) || 0;
+      await executeQuery(
+        `UPDATE loan_applications
+         SET status = 'cleared', closed_date = CURDATE(), closed_amount = ?, updated_at = NOW()
+         WHERE id = ? AND status != 'cleared'`,
+        [closedAmount, lid]
+      );
+      loanCleared = true;
+    }
+
+    return {
+      changed: true,
+      dryRun,
+      loanId: lid,
+      repaired,
+      loanCleared,
+      clearance: clearance.shouldClear
+        ? { shouldClear: true, amountDue: clearance.amountDue, totalPaid: clearance.totalPaid }
+        : { shouldClear: false, reason: clearance.reason }
+    };
+  }
+
+  return { changed: false, loanId: lid, repaired };
+}
+
+/**
+ * Fix paid EMIs where emi_amount > paid_amount (admin dashboard penalty refresh bug).
+ */
+async function repairPaidEmiAmountMismatch(executeQuery, {
+  loanId = null,
+  loanIds = null,
+  dryRun = false
+} = {}) {
+  const scopedIds = Array.isArray(loanIds) && loanIds.length > 0
+    ? loanIds.map((id) => parseInt(id, 10)).filter((id) => Number.isFinite(id) && id > 0)
+    : (loanId != null ? [parseInt(loanId, 10)] : null);
+
+  let sql = `SELECT id, emi_schedule, status FROM loan_applications WHERE emi_schedule IS NOT NULL`;
+  const params = [];
+  if (scopedIds?.length) {
+    sql += ` AND id IN (${scopedIds.map(() => '?').join(', ')})`;
+    params.push(...scopedIds);
+  }
+
+  const loans = await executeQuery(sql, params);
+  const summary = { scanned: loans.length, fixed: 0, emisAdjusted: 0, loanIds: [], dryRun };
+
+  for (const loan of loans) {
+    const schedule = parseEmiSchedule(loan.emi_schedule);
+    if (!schedule?.length) continue;
+
+    let changed = false;
+    const adjusted = [];
+    for (let i = 0; i < schedule.length; i++) {
+      const emi = schedule[i];
+      const st = String(emi?.status || '').toLowerCase();
+      if (st !== 'paid' && st !== 'completed') continue;
+
+      const paidAmt = parseFloat(emi.paid_amount);
+      const emiAmt = parseFloat(emi.emi_amount);
+      if (!paidAmt || paidAmt <= 0) continue;
+      if (!emiAmt || emiAmt <= paidAmt + 0.02) continue;
+
+      schedule[i] = {
+        ...emi,
+        emi_amount: paidAmt,
+        paid_amount: paidAmt,
+        penalty_base: 0,
+        penalty_gst: 0,
+        penalty_total: 0,
+        dpd_interest_on_total_principal: 0,
+        dpd_interest: 0
+      };
+      changed = true;
+      adjusted.push(i + 1);
+    }
+
+    if (changed) {
+      summary.fixed += 1;
+      summary.emisAdjusted += adjusted.length;
+      summary.loanIds.push(loan.id);
+      if (!dryRun) {
+        await executeQuery(
+          `UPDATE loan_applications SET emi_schedule = ?, updated_at = NOW() WHERE id = ?`,
+          [JSON.stringify(schedule), loan.id]
+        );
+      }
+    }
+  }
+
+  return summary;
+}
+
+function normalizeDateOnly(raw) {
+  if (raw == null || raw === '') return new Date().toISOString().slice(0, 10);
+  const s = String(raw).trim();
+  const lead = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (lead) return lead[1];
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  return new Date().toISOString().slice(0, 10);
+}
+
 module.exports = {
   AMOUNT_TOLERANCE,
   ACTIVE_REPAYMENT_STATUSES,
@@ -530,5 +752,7 @@ module.exports = {
   repairPendingLoanClearance,
   resolveClosedAmount,
   recordEnachLedgerTransaction,
+  repairMisclassifiedEnachEmiLedger,
+  repairPaidEmiAmountMismatch,
   getSystemAdminId
 };

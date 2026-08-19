@@ -154,6 +154,45 @@ const INDIAN_STATES = [
   'Puducherry'
 ];
 
+function getTransactionUpdatedByLabel(transaction: {
+  updated_by_label?: string;
+  description?: string;
+  payment_method?: string;
+  additional_notes?: string;
+}) {
+  if (transaction.updated_by_label) {
+    return transaction.updated_by_label;
+  }
+
+  const notes = String(transaction.additional_notes || '');
+  if (notes.includes('[updated_by:manual]')) {
+    return 'manual';
+  }
+
+  const desc = String(transaction.description || '').toLowerCase();
+  if (desc.includes('enach')) {
+    return 'PG Enach';
+  }
+
+  const method = String(transaction.payment_method || '').toLowerCase();
+  if (desc.includes('cashfree') || method === 'cashfree_payout') {
+    return 'PG normal';
+  }
+
+  return 'manual';
+}
+
+function getTransactionUpdatedByBadgeClass(label: string) {
+  switch (label) {
+    case 'PG Enach':
+      return 'bg-purple-100 text-purple-800';
+    case 'PG normal':
+      return 'bg-blue-100 text-blue-800';
+    default:
+      return 'bg-gray-100 text-gray-800';
+  }
+}
+
 function UserProfileDetail() {
   const navigate = useNavigate();
   const params = useParams();
@@ -1781,7 +1820,9 @@ function UserProfileDetail() {
         // Update local state
         if (userData && userData.transactions) {
           const updatedTransactions = userData.transactions.map((t: any) =>
-            t.id === transactionId ? { ...t, reference_number: referenceNumber.trim() } : t
+            t.id === transactionId
+              ? { ...t, reference_number: referenceNumber.trim(), updated_by_label: 'manual' }
+              : t
           );
           setUserData({ ...userData, transactions: updatedTransactions });
         }
@@ -10179,7 +10220,7 @@ function UserProfileDetail() {
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Related Loan</th>
                 <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reference</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created By</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Updated By</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -10282,7 +10323,14 @@ function UserProfileDetail() {
                       )}
                     </td>
                     <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {transaction.created_by_name || 'System'}
+                      {(() => {
+                        const updatedByLabel = getTransactionUpdatedByLabel(transaction);
+                        return (
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getTransactionUpdatedByBadgeClass(updatedByLabel)}`}>
+                            {updatedByLabel}
+                          </span>
+                        );
+                      })()}
                     </td>
                   </tr>
                 ))

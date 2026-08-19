@@ -15,6 +15,7 @@ const {
     ADMIN_REPAYMENT_PAYMENT_TYPES_SQL,
     dedupeRepaymentReportRows,
     fetchOrphanAdminRepaymentTransactions,
+    fetchOrphanExtensionRepaymentTransactions,
     sqlLoanHasRepaymentActivity,
     sqlCibilFirstRepaymentPayAt,
     sqlCibilCombinedRepaymentPayAt,
@@ -747,6 +748,7 @@ const mapPaymentTypeToClosureType = (pt) => {
     if (p === 'full_payment') return 'full';
     if (p === 'settlement') return 'settlement';
     if (p === 'loan_repayment') return 'part';
+    if (p === 'extension_fee') return 'Loan Extension';
     if (p === 'preclose') return 'preclose';
     if (p === 'full') return 'full';
     if (p === 'part') return 'part';
@@ -1734,7 +1736,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 SELECT MIN(id) AS id
                 FROM payment_orders
                 WHERE status = 'PAID'
-                  AND payment_type IN ('settlement', 'pre-close', 'full_payment', 'loan_repayment', 'emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th')
+                  AND payment_type IN ('settlement', 'pre-close', 'full_payment', 'loan_repayment', 'emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th', 'extension_fee')
                 GROUP BY order_id
             ) po_one ON po_one.id = po.id
             INNER JOIN loan_applications la ON la.id = po.loan_id
@@ -1746,7 +1748,7 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                   AND lp2.transaction_id = po.order_id
             )
             WHERE po.status = 'PAID'
-            AND po.payment_type IN ('settlement', 'pre-close', 'full_payment', 'loan_repayment', 'emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th')
+            AND po.payment_type IN ('settlement', 'pre-close', 'full_payment', 'loan_repayment', 'emi_1st', 'emi_2nd', 'emi_3rd', 'emi_4th', 'extension_fee')
             AND NOT (
                 po.order_id LIKE 'ADMIN_%'
                 AND EXISTS (
@@ -1775,8 +1777,13 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
                 to_date,
                 stateNameSubquery: CIBIL_STATE_NAME_SUBQUERY
             });
-            if (orphans.length) {
-                rows = dedupeRepaymentReportRows([...rows, ...orphans]);
+            const extOrphans = await fetchOrphanExtensionRepaymentTransactions(executeQuery, {
+                from_date,
+                to_date,
+                stateNameSubquery: CIBIL_STATE_NAME_SUBQUERY
+            });
+            if (orphans.length || extOrphans.length) {
+                rows = dedupeRepaymentReportRows([...rows, ...orphans, ...extOrphans]);
             }
         } catch (error) {
             // Fallback to old transaction_details structure if new structure doesn't work
@@ -2077,6 +2084,81 @@ router.get('/bs/repayment', authenticateAdmin, async (req, res) => {
     } catch (error) {
         console.error('Error generating BS repayment report:', error);
         res.status(500).json({ status: 'error', message: 'Failed to generate report', error: error.message });
+    }
+});
+
+/**
+ * POST /api/admin/reports/repair-paid-emi-amounts
+ * Align emi_amount with paid_amount on paid EMIs (admin dashboard mismatch fix).
+ */
+router.post('/repair-paid-emi-amounts', authenticateAdmin, async (req, res) => {
+    try {
+        await initializeDatabase();
+        const loanIdsRaw = req.query.loan_ids || req.body?.loan_ids || req.query.loan_id || req.body?.loan_id || null;
+        const dryRun = String(req.query.dry_run || req.body?.dry_run || '').toLowerCase() === 'true';
+
+        let loanIds = null;
+        if (loanIdsRaw) {
+            loanIds = String(loanIdsRaw)
+                .split(',')
+                .map((s) => parseInt(s.trim().replace(/^PLL/i, ''), 10))
+                .filter((id) => Number.isFinite(id) && id > 0);
+        }
+
+        const { repairPaidEmiAmountMismatch } = require('../utils/loanClearance');
+        const summary = await repairPaidEmiAmountMismatch(executeQuery, {
+            loanIds,
+            dryRun
+        });
+
+        res.json({
+            status: 'success',
+            message: dryRun ? 'Dry run completed' : 'Paid EMI amounts repaired',
+            data: summary
+        });
+    } catch (error) {
+        console.error('Error repairing paid EMI amounts:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to repair paid EMI amounts',
+            error: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/admin/reports/repair-enach-emi-ledger
+ * Fix eNACH EMI debits wrongly logged as part_payment (e.g. PLL6342 EMI2).
+ * Body/query: loan_id, optional transaction_id, optional emi, dry_run=true
+ */
+router.post('/repair-enach-emi-ledger', authenticateAdmin, async (req, res) => {
+    try {
+        await initializeDatabase();
+        const loanId = req.query.loan_id || req.body?.loan_id;
+        const transactionId = req.query.transaction_id || req.body?.transaction_id || null;
+        const emiNumber = req.query.emi || req.body?.emi || null;
+        const dryRun = String(req.query.dry_run || req.body?.dry_run || '').toLowerCase() === 'true';
+
+        const { repairMisclassifiedEnachEmiLedger } = require('../utils/loanClearance');
+        const result = await repairMisclassifiedEnachEmiLedger(executeQuery, {
+            loanId: parseInt(String(loanId).replace(/^PLL/i, ''), 10),
+            transactionId: transactionId != null ? parseInt(transactionId, 10) : null,
+            emiNumber: emiNumber != null ? parseInt(emiNumber, 10) : null,
+            dryRun
+        });
+
+        res.json({
+            status: 'success',
+            message: dryRun ? 'Dry run completed' : 'Repair completed',
+            data: result
+        });
+    } catch (error) {
+        console.error('Error repairing eNACH EMI ledger:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to repair eNACH EMI ledger',
+            error: error.message
+        });
     }
 });
 
